@@ -32,7 +32,7 @@ Each module:
   - Can be PRESENT or ABSENT in an organism's body plan
   - Has its own EVOLVABLE WEIGHTS (genes specific to that module)
   - Costs energy to MAINTAIN (just having it) and EXPRESS (actively using it)
-  - Can be GAINED through mutation during reproduction (0.5% chance)
+  - Can be GAINED through mutation during reproduction (1% chance)
   - Can be LOST through mutation (0.3% chance, with safety checks)
   - Can be TRANSFERRED via horizontal gene transfer from dead organisms
 
@@ -232,7 +232,7 @@ class Config:
     # ── Population ─────────────────────────────────────────────────────────
     initial_population = 200          # Bigger starting pop (was 80 in Phase 2)
     initial_consumer_fraction = 0.10  # 10% start as carnivores (20 organisms)
-    initial_detritivore_fraction = 0.06  # 6% start as detritivores (12 organisms)
+    initial_detritivore_fraction = 0.12  # 12% start as detritivores (24 organisms)
     energy_initial = 40.0
     energy_max = 150.0
     energy_reproduction_threshold = 80.0
@@ -259,8 +259,8 @@ class Config:
     #
     # Think of it like: a wolf that also photosynthesizes would be a bad wolf
     # AND a bad plant. Specialists outperform generalists.
-    producer_consume_penalty = 0.30  # Omnivores hunt at only 30% effectiveness
-    consume_producer_penalty = 0.85  # Omnivores produce at 85% effectiveness
+    producer_consume_penalty = 0.55  # Omnivores hunt at 55% effectiveness
+    consume_producer_penalty = 0.90  # Omnivores produce at 90% effectiveness
     consumer_specialist_bonus = 0.5  # Pure consumers (no production) get +50% hunting
 
     # ── Predation ──────────────────────────────────────────────────────────
@@ -273,7 +273,7 @@ class Config:
     predator_satiation = 0.7          # 70% chance a fed predator skips the next hunt
 
     # ── Decomposition ─────────────────────────────────────────────────────
-    decomp_death_deposit = 2.0        # Base decomp deposited when any organism dies
+    decomp_death_deposit = 3.5        # Base decomp deposited when any organism dies
     decomp_decay_rate = 0.998         # Decomp decays 0.2% per step (slow — food persists)
     decomp_diffusion_rate = 0.008     # Decomp spreads slightly to neighboring cells
     decomp_diffusion_interval = 3     # Diffuse every 3 steps
@@ -301,7 +301,7 @@ class Config:
 
     # ── Evolution ──────────────────────────────────────────────────────────
     mutation_rate = 0.08              # Random noise on weights during reproduction
-    module_gain_rate = 0.005          # 0.5% chance to gain a new module per birth
+    module_gain_rate = 0.01           # 1% chance to gain a new module per birth
     module_lose_rate = 0.003          # 0.3% chance to lose a module per birth
 
     # ── Horizontal Gene Transfer (unchanged from Phase 2 Step 4) ───────────
@@ -336,7 +336,7 @@ class Config:
     # ── Simulation ─────────────────────────────────────────────────────────
     total_timesteps = 10000
     snapshot_interval = 100
-    output_dir = "output_p3s4"
+    output_dir = "output_p3s4_tuned"
     random_seed = 42
 
 
@@ -438,7 +438,7 @@ class World:
            grid, close together so they can find prey immediately.
            Given high aggression genes and extra starting energy.
         
-        3. DETRITIVORES (~6%): CONSUME + MOVE + TOXPROD (no PHOTO)
+        3. DETRITIVORES (~12%): CONSUME + MOVE + TOXPROD (no PHOTO)
            Scavengers that eat decomposing matter. Also seeded near center.
            Given high decomp_preference genes. The center also gets a patch
            of starting decomposition so they have food right away.
@@ -489,7 +489,7 @@ class World:
         # ── Seed Detritivores ────────────────────────────────────────────────
         # Same as carnivores but with opposite CONSUME gene emphasis.
         remaining = np.setdiff1d(np.arange(pop), carn_idx)
-        n_detr = int(pop * c.initial_detritivore_fraction)  # 12
+        n_detr = int(pop * c.initial_detritivore_fraction)  # 24
         detr_idx = self.rng.choice(remaining, n_detr, replace=False)
         self.module_present[detr_idx, M_PHOTO] = False
         self.module_present[detr_idx, M_CONSUME] = True
@@ -501,8 +501,9 @@ class World:
         self.weights[detr_idx, consume_off + 3] = self.rng.uniform(-2.0, -0.5, n_detr)  # LOW aggression
 
         # ── Seed Starting Decomposition ──────────────────────────────────────
-        # Place some dead matter near center so detritivores have initial food.
-        self.decomposition[mid-10:mid+10, mid-10:mid+10] += self.rng.uniform(0.5, 2.0, (20, 20))
+        # Place dead matter near center so detritivores have initial food.
+        # Larger, richer patch ensures they survive the early bootstrapping period.
+        self.decomposition[mid-15:mid+15, mid-15:mid+15] += self.rng.uniform(1.0, 4.0, (30, 30))
 
         # ── Viral/HGT State ──────────────────────────────────────────────────
         self.transfer_count = np.zeros(pop, dtype=np.int32)
@@ -836,8 +837,8 @@ class World:
         
         METABOLIC INTERFERENCE: Omnivores (organisms with both production AND
         consumption modules) are penalized at both activities:
-          - Hunting at 30% effectiveness
-          - Production at 85% effectiveness
+          - Hunting at 55% effectiveness
+          - Production at 90% effectiveness
         Obligate consumers (no production modules) get +50% hunting bonus.
         """
         c = self.cfg
@@ -857,8 +858,8 @@ class World:
         is_specialist = has_consume & ~has_producer  # Pure consumer → bonus
 
         # Multipliers based on metabolic interference
-        prod_mult = np.where(is_omnivore, c.consume_producer_penalty, 1.0)  # 0.85 for omnivores
-        cons_mult = np.where(is_omnivore, c.producer_consume_penalty, 1.0)  # 0.30 for omnivores
+        prod_mult = np.where(is_omnivore, c.consume_producer_penalty, 1.0)  # 0.90 for omnivores
+        cons_mult = np.where(is_omnivore, c.producer_consume_penalty, 1.0)  # 0.55 for omnivores
         spec_mult = np.where(is_specialist, 1.0 + c.consumer_specialist_bonus, 1.0)  # 1.5 for specialists
 
         # ── FORAGE extraction bonus ──────────────────────────────────────────
@@ -968,7 +969,7 @@ class World:
           - Per-cell kill cap (1 per step) prevents local extinction
           - Predator satiation reduces hunting pressure after a meal
           - Specialists are better hunters (+15% base + +50% energy gain)
-          - Omnivores are bad hunters (30% effectiveness)
+          - Omnivores are decent hunters (55% effectiveness)
           - Weaker prey targeted preferentially (energy-proportional selection)
         
         OPTIMIZATION:
@@ -1015,7 +1016,7 @@ class World:
         base_prob = c.predation_base_success + hunt_skill * 0.3
         base_prob += np.where(has_move, 0.08, 0.0)        # Mobile predators: +8%
         base_prob += np.where(is_specialist, 0.15, 0.0)   # Specialists: +15%
-        omni_mult = np.where(is_omnivore, c.producer_consume_penalty, 1.0)  # Omnivores: ×0.30
+        omni_mult = np.where(is_omnivore, c.producer_consume_penalty, 1.0)  # Omnivores: ×0.55
 
         # Energy fraction gained on kill (specialists get more)
         frac_base = np.where(is_specialist,
@@ -1490,7 +1491,7 @@ class World:
            This prevents explosive population growth in clusters.
         
         2. MODULE EVOLUTION: Children can gain or lose modules:
-           - 0.5% chance to GAIN a random module from GAINABLE_MODULES
+           - 1% chance to GAIN a random module from GAINABLE_MODULES
            - 0.3% chance to LOSE a module (with safety checks):
              • Can't lose TOXPROD
              • Can't lose your LAST energy module (PHOTO/CHEMO/CONSUME)
@@ -1526,7 +1527,7 @@ class World:
         # ── Module evolution ─────────────────────────────────────────────────
         child_modules = self.module_present[pidx].copy()
 
-        # Module GAIN: 0.5% chance per birth
+        # Module GAIN: 1% chance per birth
         gain_rolls = self.rng.random(nb)
         for i in np.where(gain_rolls < c.module_gain_rate)[0]:
             absent = [gm for gm in GAINABLE_MODULES if not child_modules[i, gm]]
@@ -1612,7 +1613,7 @@ class World:
         "remembers" which modules were common in the dead organisms at each
         cell, enabling module transfer via HGT.
         
-        Also: larger decomposition deposit (2.0 base, was 0.5) because
+        Also: larger decomposition deposit (3.5 base) because
         decomposition is now a primary food source for detritivores.
         """
         c = self.cfg
@@ -1629,7 +1630,7 @@ class World:
             dm = self.module_present[dead]   # Dead organisms' modules
 
             # ── Decomposition deposit ────────────────────────────────────────
-            # Larger base deposit (2.0) — this is food for detritivores
+            # Base deposit (3.5) — this is food for detritivores
             np.add.at(self.decomposition, (dr, dc), de * c.nutrient_from_decomp + c.decomp_death_deposit)
 
             # ── Strata deposit (weights + modules) ───────────────────────────

@@ -122,7 +122,7 @@ class Config:
     # Population
     initial_population = 200
     initial_consumer_fraction = 0.10
-    initial_detritivore_fraction = 0.06
+    initial_detritivore_fraction = 0.12
     energy_initial = 40.0
     energy_max = 150.0
     energy_reproduction_threshold = 80.0
@@ -140,8 +140,8 @@ class Config:
     scavenge_base = 2.5
 
     # Metabolic interference (asymmetric)
-    producer_consume_penalty = 0.30  # omnivores hunt at 30% effectiveness
-    consume_producer_penalty = 0.85  # omnivores produce at 85% effectiveness
+    producer_consume_penalty = 0.55  # omnivores hunt at 55% effectiveness
+    consume_producer_penalty = 0.90  # omnivores produce at 90% effectiveness
     consumer_specialist_bonus = 0.5  # +50% for obligate consumers
 
     # Predation
@@ -154,7 +154,7 @@ class Config:
     predator_satiation = 0.7  # probability a fed predator skips next hunt
 
     # Decomposition
-    decomp_death_deposit = 2.0
+    decomp_death_deposit = 3.5
     decomp_decay_rate = 0.998
     decomp_diffusion_rate = 0.008  # light local diffusion for feeding zone
     decomp_diffusion_interval = 3
@@ -181,7 +181,7 @@ class Config:
 
     # Evolution
     mutation_rate = 0.08
-    module_gain_rate = 0.005       # slightly higher — more modules available now
+    module_gain_rate = 0.01       # doubled — more modules available now
     module_lose_rate = 0.003
 
     # Horizontal transfer
@@ -216,7 +216,7 @@ class Config:
     # Simulation
     total_timesteps = 10000
     snapshot_interval = 100
-    output_dir = "output_p3s4"
+    output_dir = "output_p3s4_tuned"
     random_seed = 42
 
 
@@ -339,7 +339,7 @@ class World:
         self.weights[detr_idx, consume_off + 3] = self.rng.uniform(-2.0, -0.5, n_detr)  # aggression
 
         # Seed decomp near center so detritivores have initial food
-        self.decomposition[mid-10:mid+10, mid-10:mid+10] += self.rng.uniform(0.5, 2.0, (20, 20))
+        self.decomposition[mid-15:mid+15, mid-15:mid+15] += self.rng.uniform(1.0, 4.0, (30, 30))
 
         # Viral/HGT state
         self.transfer_count = np.zeros(pop, dtype=np.int32)
