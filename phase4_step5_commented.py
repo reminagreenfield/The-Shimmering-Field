@@ -1,0 +1,2998 @@
+"""
+The Shimmering Field — Phase 4 Step 5: Fungal Networks
+========================================================
+Distributed infrastructure connecting death to fertility across the grid.
+
+PHASE 4 COMPLETE ARCHITECTURE
+==============================
+Phase 4 adds five failure/recovery systems on top of the Phase 3 ecology.
+Each makes the simulation more fragile AND more resilient — the ecosystem
+can now collapse, but it can also recover through novel pathways.
+
+Phase 4 systems layered across Steps 1–5:
+  Step 1: Capacity Shedding    → use-it-or-lose-it module decay
+  Step 2: Genomic Incompatibility → HGT overload cascades (3 phases)
+  Step 3: Developmental Dependency → organisms need neighbors to mature
+  Step 4: Nonlinear Collapse    → ecosystem integrity tracking + zone collapse
+  Step 5: Fungal Networks       → decomposition-fueled nutrient/genome transport ← THIS FILE
+
+These five systems interact with each other AND with the Phase 3 parasitic stack:
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │  FAILURE MODES (can compound — each multiplies costs by 1.2×)       │
+  │  ├─ Toxic stress          (environment > 0.3)                       │
+  │  ├─ Genomic cascade       (HGT overload → 3-phase breakdown)       │
+  │  ├─ Behavioral hijack     (viral movement override)                 │
+  │  ├─ Dev compromise        (past window without maturation)          │
+  │  └─ Ecosystem collapse    (integrity < 0.28 in populated zone)     │
+  │                                                                     │
+  │  RECOVERY PATHWAYS                                                  │
+  │  ├─ Capacity shedding     (shed unused modules → lower costs)       │
+  │  ├─ Genomic pruning       (emergency module loss → stress relief)   │
+  │  ├─ Stress reactivation   (dormant modules wake under pressure)     │
+  │  ├─ Fungal networks       (redistribute nutrients from death zones) │
+  │  └─ Collapse hysteresis   (must exceed 0.42 to recover, not 0.28)  │
+  └──────────────────────────────────────────────────────────────────────┘
+
+The central narrative loop:
+  Mass death → decomp surge → fungal expansion → nutrient redistribution
+  → new organisms colonize → carry HGT fragments from dead → genomic stress
+  → capacity shedding/pruning → simplified but adapted organisms emerge
+  → "what grows back carries history of what it replaced"
+
+Fungal networks (THIS STEP):
+  Growth: fungi feed on decomposition > 0.5, consuming it and producing density.
+  Surge: decomp > 5.0 triggers 3× accelerated growth (mass death → fungal bloom).
+  Spread: Gaussian diffusion (sigma=1.5) — mycelial network extends outward.
+  Decay: constant maintenance cost, so fungi need ongoing decomp to persist.
+  Transport: nutrients flow along fungi from surplus to deficit areas.
+  Conduit: toxic diffusion ACCELERATED along fungal paths (double-edged sword).
+  HGT boost: organisms on fungal tissue get up to +0.3 transfer receptivity.
+
+Module inventory (11 modules, up to 48 evolvable weights per organism):
+  PHOTO(4) CHEMO(4) CONSUME(4) MOVE(8) FORAGE(4) DEFENSE(4)
+  DETOX(4) TOXPROD(0) VRESIST(4) SOCIAL(4) MEDIATE(4) + 4 standalone = 48
+
+Built on Phase 4 Step 4 (Nonlinear Collapse Dynamics).
+"""
+
+import numpy as np
+import json
+import os
+import time
+from scipy.ndimage import uniform_filter, gaussian_filter
+
+
+# ─────────────────────────────────────────────────────
+# Module Definitions
+# ─────────────────────────────────────────────────────
+# 11 modules total. Each is a capability an organism can have.
+# NEW in Phase 4: modules have THREE states (absent / active / dormant).
+# Capacity shedding can deactivate unused modules (dormant = present but off),
+# then permanently remove them if disuse continues. Stress can reactivate
+# dormant modules — latent capabilities wake up under pressure.
+
+M_PHOTO   = 0   # Photosynthesis: light → energy. Primary producer pathway.
+M_CHEMO   = 1   # Chemosynthesis: toxin → energy via Michaelis-Menten kinetics.
+M_CONSUME = 2   # Consumption: eat other organisms or scavenge decomp.
+M_MOVE    = 3   # Locomotion: move 1 cell/step. Cost scales with module count (Phase 3 Step 9).
+M_FORAGE  = 4   # Enhanced gathering: extraction bonus, storage, cooperative signaling.
+M_DEFENSE = 5   # Anti-predation: shell, camouflage, size investment, counter-attack.
+M_DETOX   = 6   # Toxin metabolism: clean environment + gain energy from toxins.
+M_TOXPROD = 7   # Toxic waste: always present, universal pollution. Never sheds.
+M_VRESIST = 8   # Viral resistance: immune memory, specificity/breadth tradeoff.
+M_SOCIAL  = 9   # Social signaling: identity + relationship building (endosymbiosis gate).
+M_MEDIATE = 10  # Pollination/dispersal: helps neighbors reproduce + supports development.
+
+N_MODULES = 11
+
+MODULE_NAMES = [
+    "PHOTO", "CHEMO", "CONSUME", "MOVE", "FORAGE",
+    "DEFENSE", "DETOX", "TOXPROD", "VRESIST", "SOCIAL", "MEDIATE"
+]
+
+MODULE_WEIGHT_SIZES = np.array([
+    4,  # PHOTO:   [efficiency, toxic_tolerance, light_sensitivity, storage_rate]
+    4,  # CHEMO:   [efficiency, specificity, saturation_threshold, gradient_follow]
+    4,  # CONSUME: [prey_selectivity, handling_efficiency, decomp_preference, aggression]
+    8,  # MOVE:    [light_seek, density_avoid, nutrient_stay, chemo_toxic_seek,
+        #           random_wt, stay_tend, light_str, toxic_response]
+    4,  # FORAGE:  [extraction_eff, resource_discrim, storage_cap, cooperative_signal]
+    4,  # DEFENSE: [shell, camouflage, size_invest, counter_attack]
+    4,  # DETOX:   [detox_eff, toxin_tolerance, conversion_rate, selective_uptake]
+    0,  # TOXPROD: (no evolvable weights)
+    4,  # VRESIST: [recognition_specificity, suppression_strength, resistance_breadth, immune_memory]
+    4,  # SOCIAL:  [identity_signal, compatibility_assessment, approach_avoidance, relationship_strength]
+    4,  # MEDIATE: [pollination_drive, route_memory, network_coordination, reward_sensitivity]
+], dtype=np.int32)
+
+MODULE_WEIGHT_OFFSETS = np.zeros(N_MODULES, dtype=np.int32)
+_off = 0
+for _m in range(N_MODULES):
+    MODULE_WEIGHT_OFFSETS[_m] = _off
+    _off += MODULE_WEIGHT_SIZES[_m]
+TOTAL_MODULE_WEIGHTS = _off  # 32
+
+N_STANDALONE_PARAMS = 4
+STANDALONE_OFFSET = TOTAL_MODULE_WEIGHTS
+TOTAL_WEIGHT_PARAMS = TOTAL_MODULE_WEIGHTS + N_STANDALONE_PARAMS  # 36
+
+SP_TRANSFER_RECEPTIVITY = 0
+SP_TRANSFER_SELECTIVITY = 1
+SP_VIRAL_RESISTANCE = 2
+SP_LYSO_SUPPRESSION = 3
+
+# Module costs: [maintenance, expression]
+#                PH    CH    CO    MV    FO    DE    DT    TP    VR    SO    ME
+MODULE_MAINTENANCE = np.array([0.20, 0.25, 0.12, 0.08, 0.12, 0.18, 0.20, 0.03, 0.15, 0.10, 0.07])
+MODULE_EXPRESSION  = np.array([0.10, 0.12, 0.08, 0.06, 0.06, 0.10, 0.10, 0.02, 0.08, 0.05, 0.04])
+BASE_MAINTENANCE = 0.05
+# Cost examples:
+#   PHOTO+MOVE+TOXPROD                    = 0.54
+#   + FORAGE (efficient producer)         = 0.72
+#   + DEFENSE (armored producer)          = 1.00
+#   + CONSUME (all-in generalist)         = 1.20
+#   + DETOX (toxic zone specialist)       = 1.50
+#   + VRESIST (immune system)             = 1.73
+#   + SOCIAL (relational)                 = 1.88
+#   + MEDIATE (pollinator)                = 2.08
+
+GAINABLE_MODULES = [M_CHEMO, M_CONSUME, M_MOVE, M_FORAGE, M_DEFENSE, M_DETOX, M_VRESIST, M_SOCIAL, M_MEDIATE]
+
+# Phase 4 Step 1: Capacity shedding decay rates per module per check.
+# Three tiers: behavioral modules (MOVE/SOCIAL/MEDIATE) decay fastest (~200 steps
+# to deactivate), immune modules (DEFENSE/VRESIST) at medium rate (~400 steps),
+# metabolic modules (PHOTO/CHEMO/CONSUME/FORAGE/DETOX) slowest (~600 steps).
+# TOXPROD = 0 (structural, never sheds — waste production is involuntary).
+SHEDDING_DECAY = np.array([
+    0.008,   # PHOTO    — metabolic
+    0.008,   # CHEMO    — metabolic
+    0.008,   # CONSUME  — metabolic
+    0.025,   # MOVE     — behavioral
+    0.008,   # FORAGE   — metabolic
+    0.012,   # DEFENSE  — immune
+    0.008,   # DETOX    — metabolic
+    0.0,     # TOXPROD  — structural (never sheds)
+    0.012,   # VRESIST  — immune
+    0.025,   # SOCIAL   — behavioral
+    0.025,   # MEDIATE  — behavioral
+])
+
+
+# ─────────────────────────────────────────────────────
+# Configuration
+# ─────────────────────────────────────────────────────
+
+class Config:
+    grid_size = 128
+    light_max = 1.0
+    light_min = 0.05
+    zone_count = 8
+
+    # Toxicity
+    toxic_decay_rate = 0.01
+    toxic_diffusion_rate = 0.06
+    toxic_production_rate = 0.015
+    toxic_threshold_low = 0.3
+    toxic_threshold_medium = 0.8
+    toxic_threshold_high = 1.5
+    toxic_damage_medium = 1.5
+    toxic_damage_high = 5.0
+    toxic_photo_penalty = 1.0
+
+    # Nutrients
+    nutrient_base_rate = 0.002
+    nutrient_from_decomp = 0.4
+    nutrient_max = 3.0
+
+    # Population
+    initial_population = 300
+    initial_consumer_fraction = 0.15
+    initial_detritivore_fraction = 0.08
+    energy_initial = 40.0
+    energy_max = 150.0
+    energy_reproduction_threshold = 80.0
+    energy_reproduction_cost = 40.0
+    energy_movement_cost = 0.2
+    max_age = 200
+    min_reproduction_age = 8
+    offspring_distance = 5
+    # Density-dependent reproduction: threshold scales up with local crowding
+    repro_density_penalty = 5.0  # extra energy needed per neighbor
+
+    # Energy production
+    photosynthesis_base = 3.0
+    chemosynthesis_base = 2.2
+    scavenge_base = 2.5
+
+    # Metabolic interference (asymmetric)
+    producer_consume_penalty = 0.30  # omnivores hunt at 30% effectiveness
+    consume_producer_penalty = 0.85  # omnivores produce at 85% effectiveness
+    consumer_specialist_bonus = 0.5  # +50% for obligate consumers
+
+    # Predation
+    predation_check_interval = 1
+    predation_base_success = 0.14
+    predation_energy_fraction = 0.55
+    predation_hunt_radius_base = 1
+    predation_hunt_radius_mobile = 2
+    predation_max_kills_per_cell = 1  # prevents local extinction cascades
+    predator_satiation = 0.7  # probability a fed predator skips next hunt
+    # Herbivore/carnivore gradient (via prey_selectivity weight)
+    herbivore_producer_bonus = 0.10   # success bonus when herbivore targets producer
+    carnivore_consumer_bonus = 0.15   # success bonus when carnivore targets consumer (harder prey)
+    herbivore_energy_mult = 1.20      # herbivores extract MORE (abundant easy prey, eat often)
+    carnivore_energy_mult = 0.90      # carnivores extract less per kill (prey already depleted energy fleeing)
+
+    # Decomposition
+    decomp_death_deposit = 2.0
+    decomp_decay_rate = 0.998
+    decomp_diffusion_rate = 0.008  # light local diffusion for feeding zone
+    decomp_diffusion_interval = 3
+    decomp_scent_sigma = 5  # gaussian blur for navigation scent
+    decomp_scent_interval = 3  # recompute scent every N steps
+
+    # FORAGE module
+    forage_extraction_bonus = 0.25     # max +25% resource extraction
+    forage_storage_bonus = 30.0        # max extra energy capacity
+    forage_cooperative_radius = 1      # cells to check for cooperators
+    forage_cooperative_bonus = 0.08    # energy bonus per cooperating neighbor
+
+    # DEFENSE module
+    defense_shell_max = 0.55           # max predation probability reduction
+    defense_camouflage_max = 0.35      # max chance predator skips target
+    defense_counter_damage = 5.0       # energy damage to predator on failed hunt
+    defense_size_cost_mult = 1.3       # size investment increases module cost
+
+    # DETOX module
+    detox_rate_max = 0.08              # max fraction of local toxin removed per step
+    detox_tolerance_bonus = 0.6        # max addition to toxic damage threshold
+    detox_energy_conversion = 0.4      # fraction of metabolized toxin → energy
+    detox_environment_effect = 0.5     # fraction of detox that cleans the environment
+
+    # VRESIST module
+    vresist_base_resistance = 0.6      # base infection resistance with VRESIST (vs ~0.3 standalone)
+    vresist_specificity_bonus = 0.25   # extra resistance from specificity (familiar strains)
+    vresist_breadth_bonus = 0.15       # extra resistance from breadth (all strains)
+    vresist_suppression_max = 0.85     # max lysogenic suppression probability
+    vresist_memory_boost = 0.3         # resistance boost after surviving infection
+    vresist_memory_decay = 0.995       # how fast immune memory decays per step
+
+    # SOCIAL module
+    social_signal_radius = 1           # cells for social signal deposit (0 = own cell only)
+    social_compatibility_bonus = 0.15  # energy bonus per compatible neighbor
+    social_incompatibility_penalty = 0.05  # energy penalty per incompatible neighbor
+    social_relationship_growth = 0.02  # relationship score growth per step near compatible
+    social_relationship_decay = 0.998  # relationship score decay per step
+    social_update_interval = 2         # how often social field updates
+
+    # MEDIATE module (pollination/dispersal)
+    mediate_repro_bonus = 0.25         # reproduction threshold reduction per mediator nearby
+    mediate_radius = 3                 # wider radius — mediators serve larger area
+    mediate_energy_reward = 2.0        # energy reward to mediator per facilitated reproduction
+    mediate_network_decay = 0.97       # mediator field decay per step
+    mediate_update_interval = 2        # how often mediator field updates
+    mediate_passive_reward = 0.15      # energy per step when near immature organisms (dev support)
+
+    # Nutrient cycling (emergent from module interactions)
+    nutrient_detox_deposit = 0.3       # fraction of detox byproduct that becomes nutrients
+    nutrient_consume_deposit = 0.15    # nutrient release from consume processing
+    nutrient_death_per_module = 0.3    # nutrients deposited per module on death
+    nutrient_forage_coop_boost = 0.1   # local nutrient regen boost per FORAGE cooperator
+
+    # Reproductive manipulation (Wolbachia-style, via lysogenic genome)
+    repro_manip_threshold = 0.3        # min lysogenic_strength for manipulation to activate
+    repro_manip_trait_bias = 0.15      # max weight blend toward lysogenic genome in offspring
+    repro_manip_receptivity_boost = 0.4  # boost to offspring's transfer_receptivity param
+    repro_manip_viability_cost = 3.0   # energy penalty to divergent offspring
+    repro_manip_divergence_thresh = 0.5  # weight distance above which viability penalty applies
+    repro_manip_saturation = 0.7       # population lysogenic fraction where self-limiting kicks in
+
+    # Behavioral hijacking (Toxoplasma/cordyceps-style, via lytic viral load)
+    hijack_load_min = 0.05             # minimum viral_load for hijack effects
+    hijack_load_heavy = 0.5            # viral_load above which heavy hijack kicks in
+    hijack_defense_suppress = 0.6      # max defense suppression at full hijack
+    hijack_vresist_suppress = 0.4      # max VRESIST suppression at full hijack
+    hijack_energy_suppress = 0.7       # fraction of energy acquisition blocked at heavy hijack
+    hijack_density_seek = 3.0          # movement weight toward high-density areas (spread virus)
+    hijack_stress_amplifier = 1.5      # toxic stress multiplier on hijack intensity
+
+    # Endosymbiosis
+    endo_check_interval = 10           # check for mergers every N steps
+    endo_relationship_threshold = 0.6  # lower — co-location builds slowly
+    endo_energy_threshold = 50.0       # min energy for both partners
+    endo_toxic_min = 0.05              # min local toxic for stress window
+    endo_toxic_max = 1.0               # max local toxic (too harsh = can't merge)
+    endo_complementarity_min = 1       # min module difference count (sessile/mobile = complementary)
+    endo_probability = 0.15            # base probability of merger when conditions met
+    endo_vresist_penalty = 0.5         # merger probability reduction for VRESIST holders
+    endo_weight_blend = 0.5            # weight blending ratio (0.5 = equal blend)
+    endo_energy_bonus = 1.2            # energy multiplier for merged organism
+    endo_max_modules = 8               # max modules a merged organism can hold
+
+    # ── Capacity Shedding (Phase 4 Step 1): use-it-or-lose-it ──
+    # Modules that aren't useful in current conditions decay toward dormancy and loss.
+    # Pipeline: active → low usage → dormant (deactivated) → very low usage → lost
+    # Stress can reactivate dormant modules (crisis brings back latent capabilities).
+    # Collapse zones accelerate shedding by 2× (organisms simplify under pressure).
+    shedding_check_interval = 5        # check shedding every N steps
+    shedding_usage_gain = 0.015        # usage gained per check when module contributes
+    shedding_deactivate_threshold = 0.15  # usage below this → module goes dormant
+    shedding_loss_threshold = 0.03     # usage below this → module lost from genome
+    shedding_stress_reactivation = 0.3 # toxic level that reactivates dormant modules
+    # Decay rates per check (per shedding_check_interval steps):
+    shedding_decay_behavioral = 0.025  # MOVE, SOCIAL, MEDIATE — ~200 steps to deactivate
+    shedding_decay_immune = 0.012      # VRESIST, DEFENSE — ~400 steps
+    shedding_decay_metabolic = 0.008   # PHOTO, CHEMO, CONSUME, FORAGE, DETOX — ~600 steps
+
+    # ── Genomic Incompatibility (Phase 4 Step 2): cascade failure from HGT overload ──
+    # Organisms that absorb too much foreign DNA (via HGT) accumulate genomic_stress.
+    # When stress exceeds cascade_threshold, a 3-phase breakdown fires:
+    #   Phase 1 (≥ thresh):     Metabolic disruption — energy acquisition reduced 40%
+    #   Phase 2 (≥ thresh×1.5): Regulatory breakdown — random module deactivation 30%/check
+    #   Phase 3 (≥ thresh×2.0): Identity dissolution — direct 2.0 energy drain per step
+    # Recovery: stress drops below 0.7× threshold → step down one phase.
+    # Emergency pruning: at extreme stress (≥4.0), shed least-used modules for relief.
+    # Toxic environments amplify genomic stress (toxic × 1.5 added to effective stress).
+    genomic_check_interval = 10        # check cascade every N steps
+    genomic_stress_per_transfer = 0.15  # stress added per HGT event
+    genomic_stress_decay = 0.005       # faster natural integration per step
+    genomic_cascade_threshold = 3.0    # higher threshold — cascades are rare events
+    genomic_toxic_multiplier = 1.5     # toxic amplifies stress for cascade check
+    genomic_phase1_energy_penalty = 0.4  # energy acquisition reduction
+    genomic_phase2_deactivate_prob = 0.3  # prob of random module deactivation
+    genomic_phase3_energy_drain = 2.0  # direct energy drain per step
+    genomic_pruning_threshold = 4.0    # stress level triggering pruning
+    genomic_pruning_module_loss = 2    # max modules lost during pruning
+    genomic_pruning_stress_relief = 0.8  # fraction of stress removed
+    genomic_pruning_receptivity_boost = 0.5  # transfer receptivity boost post-prune
+
+    # ── Developmental Dependency (Phase 4 Step 3): maturation needs neighbors ──
+    # Newborn organisms start immature (dev_progress=0). They must accumulate
+    # developmental progress by being near compatible neighbors within a time window.
+    # Cross-type neighbors (producer near consumer) give full progress rate.
+    # Same-type support at 0.6× rate. Mediators help everyone at 0.5×.
+    # Raw co-location: any neighbor adds 0.25× rate (isolation is dangerous).
+    # If the window expires without maturation → permanent compromise:
+    #   energy penalty (up to 50%), reproduction threshold ×1.5, aging speed ×1.5.
+    dev_window_length = 75             # developmental window (steps)
+    dev_progress_rate = 0.04           # progress per step near compatible organism
+    dev_compromise_energy = 0.5        # max energy penalty for fully compromised
+    dev_compromise_repro = 1.5         # reproduction threshold multiplier when compromised
+    dev_compromise_aging = 1.5         # aging speed multiplier when compromised
+
+    # ── Nonlinear Collapse Dynamics (Phase 4 Step 4): ecosystem-level failure ──
+    # Per-cell ecosystem_integrity computed from active signals:
+    #   population density (45%) + mediator service (20%) + diversity (20%) + fungal (15%)
+    #   minus toxic penalty (30%) and viral penalty (15%).
+    # When integrity drops below collapse_threshold → zone_collapsed = True.
+    # Recovery only above recovery_threshold (hysteresis prevents flicker).
+    # Collapsed zones impose: repro penalty (80%), energy penalty (0.3/step),
+    # shedding acceleration (2×). COMPOUNDING: each overlapping failure mode
+    # (toxic + cascade + hijack + dev compromise + collapse) multiplies costs by 1.2×.
+    collapse_threshold = 0.28          # ecosystem integrity below this → collapsed
+    recovery_threshold = 0.42          # must exceed this to recover (hysteresis)
+    collapse_repro_penalty = 0.8       # max reproduction success reduction in collapsed zone
+    collapse_energy_penalty = 0.3      # energy acquisition penalty in collapsed zone
+    collapse_shedding_mult = 2.0       # shedding accelerates in collapsed zones
+    collapse_sigmoid_steepness = 15.0  # steepness of sigmoid collapse function
+    compounding_base = 1.2             # each active failure mode multiplies stress by this
+
+    # ── Fungal Networks (Phase 4 Step 5 — THIS STEP): grid infrastructure ──
+    # NOT organisms — a grid-level system that emerges from decomposition.
+    # Growth: fungi feed on decomposition > threshold, consuming it to produce density.
+    # Surge: decomp > 5.0 triggers 3× accelerated growth (mass death → fungal bloom).
+    # Spread: Gaussian diffusion (sigma=1.5) — mycelial network extends outward.
+    # Decay: constant maintenance cost, fungi need ongoing decomp to persist.
+    # Transport: nutrients flow along fungi from surplus to deficit areas.
+    # Conduit: toxic diffusion ACCELERATED along fungal paths (double-edged sword).
+    # HGT boost: organisms on fungal tissue get up to +0.3 transfer receptivity.
+    fungal_growth_rate = 0.02          # growth from decomposition per step
+    fungal_decomp_threshold = 0.5     # min decomp to feed fungal growth
+    fungal_diffusion_rate = 0.05       # spread rate to neighbors
+    fungal_decay_rate = 0.005          # maintenance decay per step
+    fungal_nutrient_transport = 0.03   # fraction of nutrients redistributed via fungi
+    fungal_toxic_conduit = 0.02        # toxic diffusion bonus along fungal paths
+    fungal_hgt_transport = 0.2         # fraction of genome fragments carried by fungi
+    fungal_surge_mult = 3.0            # growth rate multiplier during decomp surges
+    fungal_surge_threshold = 5.0       # decomp level that triggers surge growth
+    fungal_update_interval = 3         # update fungal grid every N steps
+
+    # Evolution
+    mutation_rate = 0.08
+    module_gain_rate = 0.005       # slightly higher — more modules available now
+    module_lose_rate = 0.003
+
+    # Horizontal transfer
+    transfer_check_interval = 5
+    transfer_blend_rate_recent = 0.10
+    transfer_blend_rate_intermediate = 0.18
+    transfer_blend_rate_ancient = 0.30
+    decomp_fragment_decay = 0.005
+    decomp_fragment_diffusion = 0.008
+    module_transfer_rate = 0.015
+    sedimentation_rate_recent = 0.005
+    sedimentation_rate_intermediate = 0.002
+    ancient_decay_rate = 0.001
+    stratum_access_medium = 0.3
+    stratum_access_high = 0.8
+
+    # Viral system
+    viral_decay_rate = 0.01
+    viral_diffusion_rate = 0.08
+    viral_infection_rate = 0.3
+    viral_lytic_damage = 2.0
+    viral_lytic_growth = 0.1
+    viral_burst_threshold = 1.0
+    viral_burst_amount = 8.0
+    viral_burst_radius = 3
+    lysogenic_probability = 0.4
+    lysogenic_activation_toxic = 0.6
+    lysogenic_blend_rate = 0.1
+    lysogenic_inheritance = 0.8
+    viral_check_interval = 3
+
+    # Simulation
+    total_timesteps = 10000
+    snapshot_interval = 100
+    output_dir = "output_p4s5"
+    random_seed = 42
+
+
+# ─────────────────────────────────────────────────────
+# World
+# ─────────────────────────────────────────────────────
+
+class World:
+    def __init__(self, cfg=None):
+        self.cfg = cfg or Config()
+        c = self.cfg
+        self.rng = np.random.default_rng(c.random_seed)
+        self.timestep = 0
+        self.next_id = 0
+        N = c.grid_size
+
+        # ── Environment layers ──
+        self.light = np.linspace(c.light_max, c.light_min, N)[:, None] * np.ones((1, N))
+        self.toxic = self.rng.uniform(0.0, 0.005, (N, N))
+        self.nutrients = self.rng.uniform(0.02, 0.08, (N, N))
+        self.decomposition = np.zeros((N, N))
+        self.decomp_scent = np.zeros((N, N))
+        self.density = np.zeros((N, N), dtype=np.int32)
+
+        # Zone map: heterogeneous toxic production rates
+        zone_size = N // c.zone_count
+        self.zone_map = np.ones((N, N))
+        for zi in range(c.zone_count):
+            for zj in range(c.zone_count):
+                r0, r1 = zi * zone_size, (zi + 1) * zone_size
+                c0, c1 = zj * zone_size, (zj + 1) * zone_size
+                self.zone_map[r0:r1, c0:c1] = self.rng.choice(
+                    [0.3, 0.5, 0.7, 1.0, 1.0, 1.2, 1.5, 2.0])
+        self.zone_map = uniform_filter(self.zone_map, size=8)
+
+        # Stratified fragment pools (horizontal gene transfer)
+        self.strata_pool = {s: np.zeros((N, N, TOTAL_WEIGHT_PARAMS))
+                           for s in ("recent", "intermediate", "ancient")}
+        self.strata_weight = {s: np.zeros((N, N))
+                             for s in ("recent", "intermediate", "ancient")}
+        self.strata_modules = {s: np.zeros((N, N, N_MODULES))
+                              for s in ("recent", "intermediate", "ancient")}
+
+        # Viral system
+        self.viral_particles = np.zeros((N, N))
+        for _ in range(8):
+            sr, sc_ = self.rng.integers(0, N), self.rng.integers(0, N)
+            r0, r1 = max(0, sr - 5), min(N, sr + 6)
+            c0_, c1_ = max(0, sc_ - 5), min(N, sc_ + 6)
+            self.viral_particles[r0:r1, c0_:c1_] += self.rng.uniform(0.5, 2.0)
+        self.viral_genome_pool = np.zeros((N, N, TOTAL_WEIGHT_PARAMS))
+        self.viral_genome_weight = np.zeros((N, N))
+        seed_mask = self.viral_particles > 0.1
+        self.viral_genome_pool[seed_mask] = self.rng.normal(
+            0, 0.5, (int(seed_mask.sum()), TOTAL_WEIGHT_PARAMS))
+        self.viral_genome_weight[seed_mask] = 1.0
+
+        # Social signal field: two channels [producer_signal, consumer_signal]
+        self.social_field = np.zeros((N, N, 2))
+
+        # Mediator field: pollination/dispersal service availability
+        self.mediator_field = np.zeros((N, N))
+
+        # Ecosystem integrity and collapse state (hysteresis)
+        # Phase 4 Step 4: Ecosystem integrity and collapse state (hysteresis system).
+        # integrity = weighted sum of active ecological signals, minus stress penalties.
+        # zone_collapsed flips True when integrity < 0.28, only recovers above 0.42.
+        # The 0.14 gap between collapse and recovery prevents oscillation.
+        self.ecosystem_integrity = np.ones((N, N)) * 0.5  # moderate starting integrity
+        self.zone_collapsed = np.zeros((N, N), dtype=bool)  # no initial collapse
+
+        # Fungal network (grid-level infrastructure, not organisms)
+        # Phase 4 Step 5 (THIS STEP): Fungal network density grid.
+        # Grows from decomposition, spreads via diffusion, transports nutrients/toxins.
+        # Boosts HGT receptivity for organisms standing on fungal tissue.
+        # Not organisms — a distributed infrastructure connecting death to fertility.
+        self.fungal_density = np.zeros((N, N))  # starts empty, grows from first deaths
+
+        # ── Organisms ──
+        self._init_organisms()
+
+        # Stats
+        self.total_transfers = 0
+        self.transfers_by_stratum = {"recent": 0, "intermediate": 0, "ancient": 0}
+        self.total_lytic_deaths = 0
+        self.total_lysogenic_integrations = 0
+        self.total_lysogenic_activations = 0
+        self.total_predation_kills = 0
+        self.stats_history = []
+        self.total_manipulated_births = 0
+        self.total_hijacked_steps = 0  # cumulative organism-steps under hijack
+        self.total_mergers = 0
+
+    def _init_organisms(self):
+        """Seed initial population: producers, carnivores, detritivores."""
+        c = self.cfg
+        N = c.grid_size
+        pop = c.initial_population
+        mid = N // 2
+
+        self.rows = self.rng.integers(0, N, size=pop).astype(np.int64)
+        self.cols = self.rng.integers(0, N, size=pop).astype(np.int64)
+        self.energy = np.full(pop, c.energy_initial)
+        self.age = np.zeros(pop, dtype=np.int32)
+        self.generation = np.zeros(pop, dtype=np.int32)
+        self.ids = np.arange(pop, dtype=np.int64)
+        self.parent_ids = np.full(pop, -1, dtype=np.int64)
+        self.next_id = pop
+
+        # Default genome: PHOTO + MOVE + TOXPROD (mobile producers)
+        self.module_present = np.zeros((pop, N_MODULES), dtype=bool)
+        self.module_present[:, M_PHOTO] = True
+        self.module_present[:, M_MOVE] = True
+        self.module_present[:, M_TOXPROD] = True
+
+        # Sessile producers: 40% start without MOVE (rooted, efficient photosynthesizers)
+        n_sessile = int(pop * 0.4)
+        sessile_idx = self.rng.choice(pop, n_sessile, replace=False)
+        self.module_present[sessile_idx, M_MOVE] = False
+
+        self.module_active = self.module_present.copy()
+
+        self.weights = self.rng.normal(0, 0.5, (pop, TOTAL_WEIGHT_PARAMS))
+
+        # Seed carnivores: CONSUME+MOVE+TOXPROD, no PHOTO, high aggression
+        n_carn = int(pop * c.initial_consumer_fraction)
+        carn_idx = self.rng.choice(pop, n_carn, replace=False)
+        self.module_present[carn_idx, M_PHOTO] = False
+        self.module_present[carn_idx, M_CONSUME] = True
+        self.module_active[carn_idx] = self.module_present[carn_idx]
+        self.rows[carn_idx] = self.rng.integers(mid - 20, mid + 20, n_carn).astype(np.int64)
+        self.cols[carn_idx] = self.rng.integers(mid - 20, mid + 20, n_carn).astype(np.int64)
+        self.energy[carn_idx] = c.energy_initial * 1.5
+        # Seed CONSUME weights: high aggression, low decomp_pref
+        consume_off = int(MODULE_WEIGHT_OFFSETS[M_CONSUME])
+        self.weights[carn_idx, consume_off + 3] = self.rng.uniform(1.0, 2.5, n_carn)   # aggression
+        self.weights[carn_idx, consume_off + 2] = self.rng.uniform(-3.0, -1.5, n_carn)  # decomp_pref
+
+        # Seed detritivores: CONSUME+MOVE+TOXPROD, no PHOTO, high decomp_pref
+        remaining = np.setdiff1d(np.arange(pop), carn_idx)
+        n_detr = int(pop * c.initial_detritivore_fraction)
+        detr_idx = self.rng.choice(remaining, n_detr, replace=False)
+        self.module_present[detr_idx, M_PHOTO] = False
+        self.module_present[detr_idx, M_CONSUME] = True
+        self.module_active[detr_idx] = self.module_present[detr_idx]
+        self.rows[detr_idx] = self.rng.integers(mid - 15, mid + 15, n_detr).astype(np.int64)
+        self.cols[detr_idx] = self.rng.integers(mid - 15, mid + 15, n_detr).astype(np.int64)
+        self.energy[detr_idx] = c.energy_initial * 1.5
+        self.weights[detr_idx, consume_off + 2] = self.rng.uniform(1.5, 3.0, n_detr)   # decomp_pref
+        self.weights[detr_idx, consume_off + 3] = self.rng.uniform(-2.0, -0.5, n_detr)  # aggression
+
+        # Seed decomp near center so detritivores have initial food
+        self.decomposition[mid-10:mid+10, mid-10:mid+10] += self.rng.uniform(0.5, 2.0, (20, 20))
+
+        # Viral/HGT state
+        self.transfer_count = np.zeros(pop, dtype=np.int32)
+        self.viral_load = np.zeros(pop, dtype=np.float64)
+        self.lysogenic_strength = np.zeros(pop, dtype=np.float64)
+        self.lysogenic_genome = np.zeros((pop, TOTAL_WEIGHT_PARAMS), dtype=np.float64)
+
+        # VRESIST: immune memory from surviving infections
+        self.immune_experience = np.zeros(pop, dtype=np.float64)
+        # SOCIAL: relationship accumulation with compatible neighbors
+        self.relationship_score = np.zeros(pop, dtype=np.float64)
+        # Endosymbiosis: merger history
+        self.merger_count = np.zeros(pop, dtype=np.int32)
+        # ── Phase 4 organism fields ──
+        # Step 1: Capacity shedding — per-module usage scores [0,1].
+        # Tracks how useful each module is in current environment.
+        # Starts at 1.0 for present modules (full usefulness assumed at birth).
+        self.module_usage = np.zeros((pop, N_MODULES), dtype=np.float64)
+        self.module_usage[self.module_present] = 1.0
+        # Step 2: Genomic incompatibility — stress from accumulated HGT.
+        # genomic_stress rises with each transfer event, decays naturally.
+        # genomic_cascade_phase: 0=healthy, 1=metabolic disruption, 2=regulatory
+        #   breakdown, 3=identity dissolution (lethal if sustained).
+        self.genomic_stress = np.zeros(pop, dtype=np.float64)
+        self.genomic_cascade_phase = np.zeros(pop, dtype=np.int32)
+        # Step 3: Developmental dependency — maturation progress.
+        # dev_progress accumulates toward 1.0 when near compatible neighbors.
+        # is_mature: True once dev_progress reaches 1.0 (or True at birth for founders).
+        # If dev_progress < 1.0 when age > dev_window_length → permanently compromised.
+        self.dev_progress = np.zeros(pop, dtype=np.float64)
+        self.is_mature = np.zeros(pop, dtype=bool)
+        # Founding organisms start fully mature (they bootstrapped the ecosystem).
+        self.is_mature[:] = True
+        self.dev_progress[:] = 1.0
+
+    @property
+    def pop(self):
+        return len(self.rows)
+
+    # ── Helpers ──
+
+    def _module_weights(self, module_id):
+        off = int(MODULE_WEIGHT_OFFSETS[module_id])
+        sz = int(MODULE_WEIGHT_SIZES[module_id])
+        return self.weights[:, off:off+sz] if sz > 0 else None
+
+    def _standalone_params(self):
+        return self.weights[:, STANDALONE_OFFSET:]
+
+    def _compute_module_costs(self):
+        maint = self.module_present.astype(np.float64) @ MODULE_MAINTENANCE
+        expr = self.module_active.astype(np.float64) @ MODULE_EXPRESSION
+        return BASE_MAINTENANCE + maint + expr
+
+    def _effective_energy_max(self):
+        """FORAGE storage_cap: foragers can store extra energy."""
+        c = self.cfg
+        effective_max = np.full(self.pop, c.energy_max)
+        has_forage = self.module_active[:, M_FORAGE]
+        if has_forage.any():
+            fw = self._module_weights(M_FORAGE)
+            storage = c.forage_storage_bonus * (1.0 / (1.0 + np.exp(-fw[:, 2])))
+            effective_max += storage * has_forage
+        return effective_max
+
+    def _compute_total_costs(self):
+        """Module costs + DEFENSE size surcharge + movement complexity scaling."""
+        c = self.cfg
+        costs = self._compute_module_costs()
+        has_defense = self.module_active[:, M_DEFENSE]
+        if has_defense.any():
+            dw = self._module_weights(M_DEFENSE)
+            size_invest = np.maximum(0, np.tanh(dw[:, 2])) * has_defense
+            costs += size_invest * (c.defense_size_cost_mult - 1.0) * (
+                MODULE_MAINTENANCE[M_DEFENSE] + MODULE_EXPRESSION[M_DEFENSE])
+        # Movement complexity penalty: more modules = heavier = MOVE costs more
+        # Each module beyond 2 adds 0.05 to MOVE cost.
+        # PHOTO+MOVE+TOXPROD (3 modules) pays 0.05 surcharge, +FORAGE (4) pays 0.10, etc.
+        has_move = self.module_active[:, M_MOVE]
+        if has_move.any():
+            module_count = self.module_present.sum(axis=1).astype(np.float64)
+            extra_modules = np.maximum(0, module_count - 2.0)
+            move_surcharge = extra_modules * 0.05 * has_move
+            costs += move_surcharge
+        return costs
+
+    # Every per-organism array must be listed here so _filter_organisms and
+    # _append_organisms can maintain consistency. Phase 4 adds: module_usage,
+    # genomic_stress, genomic_cascade_phase, dev_progress, is_mature.
+    _ORG_FIELDS = [
+        "rows", "cols", "energy", "age", "generation", "ids", "parent_ids",
+        "weights", "module_present", "module_active", "transfer_count",
+        "viral_load", "lysogenic_strength", "lysogenic_genome",
+        "immune_experience", "relationship_score", "merger_count", "module_usage",
+        "genomic_stress", "genomic_cascade_phase",
+        "dev_progress", "is_mature",
+    ]
+
+    def _filter_organisms(self, mask):
+        for name in self._ORG_FIELDS:
+            setattr(self, name, getattr(self, name)[mask])
+
+    def _append_organisms(self, d):
+        for name in self._ORG_FIELDS:
+            setattr(self, name, np.concatenate([getattr(self, name), d[name]]))
+
+    # ── Environment ──
+
+    def _update_environment(self):
+        c = self.cfg
+
+        # Toxic diffusion + decay
+        p = np.pad(self.toxic, 1, mode='edge')
+        nb = (p[:-2, 1:-1] + p[2:, 1:-1] + p[1:-1, :-2] + p[1:-1, 2:]) / 4.0
+        self.toxic += c.toxic_diffusion_rate * (nb - self.toxic)
+        self.toxic *= (1.0 - c.toxic_decay_rate / np.maximum(0.3, self.zone_map))
+
+        # Toxic production by organisms
+        if self.pop > 0:
+            has_toxprod = self.module_active[:, M_TOXPROD]
+            rates = np.where(has_toxprod, c.toxic_production_rate, 0.0)
+            np.add.at(self.toxic, (self.rows, self.cols),
+                      rates * self.zone_map[self.rows, self.cols])
+
+        # Nutrients: slow regeneration + very slow decomp→nutrient conversion
+        self.nutrients += c.nutrient_base_rate
+        xfer = self.decomposition * 0.001
+        self.nutrients += xfer
+        self.decomposition -= xfer
+
+        # Decomp decay
+        self.decomposition *= c.decomp_decay_rate
+
+        # Decomp local diffusion: spreads food 2-3 cells from death sites
+        if self.timestep % c.decomp_diffusion_interval == 0:
+            dp = np.pad(self.decomposition, 1, mode='edge')
+            dnb = (dp[:-2, 1:-1] + dp[2:, 1:-1] + dp[1:-1, :-2] + dp[1:-1, 2:]) / 4.0
+            self.decomposition += c.decomp_diffusion_rate * (dnb - self.decomposition)
+
+        # Scent layer: gaussian blur for detritivore navigation (cached)
+        if self.timestep % c.decomp_scent_interval == 0:
+            self.decomp_scent = gaussian_filter(
+                self.decomposition, sigma=c.decomp_scent_sigma, mode='constant')
+
+        # Stratified sedimentation
+        self._update_strata()
+
+        # Viral diffusion + decay
+        self._update_viral_environment()
+
+        # Clamp
+        np.clip(self.toxic, 0, 5.0, out=self.toxic)
+        np.clip(self.nutrients, 0, c.nutrient_max, out=self.nutrients)
+        np.clip(self.decomposition, 0, 30.0, out=self.decomposition)
+        np.clip(self.viral_particles, 0, 20.0, out=self.viral_particles)
+
+    def _update_strata(self):
+        c = self.cfg
+        # Recent → Intermediate
+        xfer_w = self.strata_weight["recent"] * c.sedimentation_rate_recent
+        self.strata_weight["recent"] -= xfer_w
+        new_iw = self.strata_weight["intermediate"] + xfer_w
+        blend = xfer_w / np.maximum(new_iw, 1e-8)
+        for key in ("strata_pool", "strata_modules"):
+            pool = getattr(self, key)
+            pool["intermediate"] = (pool["intermediate"] * (1.0 - blend[:, :, None])
+                                   + pool["recent"] * blend[:, :, None])
+        self.strata_weight["intermediate"] = new_iw
+
+        # Intermediate → Ancient
+        xfer_w2 = self.strata_weight["intermediate"] * c.sedimentation_rate_intermediate
+        self.strata_weight["intermediate"] -= xfer_w2
+        new_aw = self.strata_weight["ancient"] + xfer_w2
+        blend2 = xfer_w2 / np.maximum(new_aw, 1e-8)
+        for key in ("strata_pool", "strata_modules"):
+            pool = getattr(self, key)
+            pool["ancient"] = (pool["ancient"] * (1.0 - blend2[:, :, None])
+                              + pool["intermediate"] * blend2[:, :, None])
+        self.strata_weight["ancient"] = new_aw
+
+        # Decay
+        self.strata_weight["recent"] *= (1.0 - c.decomp_fragment_decay)
+        self.strata_weight["intermediate"] *= (1.0 - c.decomp_fragment_decay * 0.5)
+        self.strata_weight["ancient"] *= (1.0 - c.ancient_decay_rate)
+
+        # Fragment diffusion (periodic)
+        if self.timestep % 10 == 0:
+            k = c.decomp_fragment_diffusion * 10
+            for sname in ("recent", "intermediate", "ancient"):
+                sw = self.strata_weight[sname]
+                if sw.max() < 0.001:
+                    continue
+                pw = np.pad(sw, 1, mode='edge')
+                wn = (pw[:-2, 1:-1] + pw[2:, 1:-1] + pw[1:-1, :-2] + pw[1:-1, 2:]) / 4.0
+                self.strata_weight[sname] += k * (wn - sw)
+                self.strata_weight[sname] = np.maximum(self.strata_weight[sname], 0.0)
+                sp = self.strata_pool[sname]
+                pp = np.pad(sp, ((1, 1), (1, 1), (0, 0)), mode='edge')
+                gn = (pp[:-2, 1:-1, :] + pp[2:, 1:-1, :] + pp[1:-1, :-2, :] + pp[1:-1, 2:, :]) / 4.0
+                self.strata_pool[sname] += k * (gn - sp)
+
+    def _update_viral_environment(self):
+        c = self.cfg
+        self.viral_particles *= (1.0 - c.viral_decay_rate)
+        pv = np.pad(self.viral_particles, 1, mode='edge')
+        vn = (pv[:-2, 1:-1] + pv[2:, 1:-1] + pv[1:-1, :-2] + pv[1:-1, 2:]) / 4.0
+        self.viral_particles += c.viral_diffusion_rate * (vn - self.viral_particles)
+        self.viral_particles = np.maximum(self.viral_particles, 0.0)
+
+        if self.timestep % 10 == 0 and self.viral_genome_weight.max() > 0.001:
+            self.viral_genome_weight *= (1.0 - c.viral_decay_rate * 10)
+            self.viral_genome_weight = np.maximum(self.viral_genome_weight, 0.0)
+            pp = np.pad(self.viral_genome_pool, ((1, 1), (1, 1), (0, 0)), mode='edge')
+            gn = (pp[:-2, 1:-1, :] + pp[2:, 1:-1, :] + pp[1:-1, :-2, :] + pp[1:-1, 2:, :]) / 4.0
+            self.viral_genome_pool += c.viral_diffusion_rate * (gn - self.viral_genome_pool)
+
+    def _update_density(self):
+        self.density[:] = 0
+        if self.pop > 0:
+            np.add.at(self.density, (self.rows, self.cols), 1)
+
+    # ── Sensing ──
+    # Each organism reads 22 values from the grid at its current position.
+    # These readings drive ALL organism decisions (movement, energy, shedding relevance).
+    # Layout: [0-2] local values, [3] density, [4-7] light/toxic gradients,
+    # [8] decomposition, [9-14] density/scent/nutrient gradients,
+    # [15-20] social signal values + gradients, [21] mediator field.
+
+    def _sense_local(self):
+        rows, cols = self.rows, self.cols
+        N = self.cfg.grid_size
+        ru = np.clip(rows - 1, 0, N - 1)
+        rd = np.clip(rows + 1, 0, N - 1)
+        cl = np.clip(cols - 1, 0, N - 1)
+        cr = np.clip(cols + 1, 0, N - 1)
+        return np.column_stack([
+            self.light[rows, cols],                                          # 0: local_light
+            self.toxic[rows, cols],                                          # 1: local_toxic
+            self.nutrients[rows, cols],                                      # 2: local_nutrients
+            self.density[rows, cols].astype(np.float64),                     # 3: local_density
+            self.light[ru, cols] - self.light[rd, cols],                     # 4: light_grad_y
+            self.light[rows, cr] - self.light[rows, cl],                     # 5: light_grad_x
+            self.toxic[ru, cols] - self.toxic[rd, cols],                     # 6: toxic_grad_y
+            self.toxic[rows, cr] - self.toxic[rows, cl],                     # 7: toxic_grad_x
+            self.decomposition[rows, cols],                                  # 8: local_decomp (raw)
+            self.density[ru, cols].astype(np.float64)
+                - self.density[rd, cols].astype(np.float64),                 # 9: density_grad_y
+            self.density[rows, cr].astype(np.float64)
+                - self.density[rows, cl].astype(np.float64),                 # 10: density_grad_x
+            self.decomp_scent[ru, cols] - self.decomp_scent[rd, cols],       # 11: scent_grad_y
+            self.decomp_scent[rows, cr] - self.decomp_scent[rows, cl],       # 12: scent_grad_x
+            self.nutrients[ru, cols] - self.nutrients[rd, cols],              # 13: nutrient_grad_y
+            self.nutrients[rows, cr] - self.nutrients[rows, cl],              # 14: nutrient_grad_x
+            self.social_field[rows, cols, 0],                                 # 15: social_prod_signal
+            self.social_field[rows, cols, 1],                                 # 16: social_cons_signal
+            self.social_field[ru, cols, 0] - self.social_field[rd, cols, 0],  # 17: social_prod_grad_y
+            self.social_field[rows, cr, 0] - self.social_field[rows, cl, 0],  # 18: social_prod_grad_x
+            self.social_field[ru, cols, 1] - self.social_field[rd, cols, 1],  # 19: social_cons_grad_y
+            self.social_field[rows, cr, 1] - self.social_field[rows, cl, 1],  # 20: social_cons_grad_x
+            self.mediator_field[rows, cols],                                   # 21: local_mediator
+        ])
+
+    # ── Energy Acquisition ──
+
+    def _acquire_energy(self, readings):
+        c = self.cfg
+        n = self.pop
+        total_gain = np.zeros(n)
+
+        local_light = readings[:, 0]
+        local_toxic = readings[:, 1]
+        local_density = readings[:, 3]
+        local_decomp = readings[:, 8]
+
+        # Metabolic interference masks
+        has_producer = self.module_active[:, M_PHOTO] | self.module_active[:, M_CHEMO]
+        has_consume = self.module_active[:, M_CONSUME]
+        is_omnivore = has_producer & has_consume
+        is_specialist = has_consume & ~has_producer
+
+        prod_mult = np.where(is_omnivore, c.consume_producer_penalty, 1.0)
+        cons_mult = np.where(is_omnivore, c.producer_consume_penalty, 1.0)
+        spec_mult = np.where(is_specialist, 1.0 + c.consumer_specialist_bonus, 1.0)
+
+        # ── FORAGE bonus: extraction efficiency ──
+        has_forage = self.module_active[:, M_FORAGE]
+        forage_mult = np.ones(n)
+        if has_forage.any():
+            fw = self._module_weights(M_FORAGE)
+            extract_eff = c.forage_extraction_bonus * (1.0 / (1.0 + np.exp(-fw[:, 0])))
+            forage_mult = 1.0 + extract_eff * has_forage
+
+        # PHOTO
+        has_photo = self.module_active[:, M_PHOTO]
+        if has_photo.any():
+            ph = self._module_weights(M_PHOTO)
+            eff = c.photosynthesis_base * (1.0 + 0.3 * np.tanh(ph[:, 0]))
+            tol = np.maximum(0.1, 1.0 + 0.5 * np.tanh(ph[:, 1]))
+            tp = np.maximum(0.0, 1.0 - local_toxic * c.toxic_photo_penalty / tol)
+            le = np.maximum(0.3, 1.0 - 0.3 * np.tanh(ph[:, 2]))
+            lm = np.power(np.maximum(local_light, 0.01), le)
+            st = 0.5 + 0.5 / (1.0 + np.exp(-ph[:, 3]))
+            sh = 1.0 / np.maximum(1.0, local_density * 0.5)
+            # Sessile bonus: rooted producers photosynthesize 50% better (deeper roots, better orientation)
+            sessile_bonus = np.where(has_photo & ~self.module_active[:, M_MOVE], 1.50, 1.0)
+            total_gain += (eff * tp * lm * st * sh * prod_mult * forage_mult * sessile_bonus) * has_photo
+
+        # CHEMO
+        has_chemo = self.module_active[:, M_CHEMO]
+        if has_chemo.any():
+            ch = self._module_weights(M_CHEMO)
+            eff = c.chemosynthesis_base * (1.0 + 0.3 * np.tanh(ch[:, 0]))
+            sat = 1.0 + np.abs(ch[:, 2]) * 0.5
+            toxic_factor = local_toxic / (local_toxic + sat)
+            sh = 1.0 / np.maximum(1.0, local_density * 0.4)
+            total_gain += (eff * toxic_factor * sh * prod_mult * forage_mult) * has_chemo
+
+        # CONSUME (scavenging/detritivory component)
+        if has_consume.any():
+            uw = self._module_weights(M_CONSUME)
+            decomp_pref = 1.0 / (1.0 + np.exp(-uw[:, 2]))
+            handling = 1.0 + 0.3 * np.tanh(uw[:, 1])
+
+            # Detritivory: direct decomposition consumption (decomp_pref > 0.3)
+            # High decomp_pref = dedicated detritivore, reliable energy from carrion/detritus
+            extract_rate = 0.05 + 0.25 * decomp_pref  # up to 0.30 of local decomp
+            intake_cap = 0.5 + 2.5 * decomp_pref      # up to 3.0 energy/step
+            available = np.minimum(local_decomp * extract_rate, intake_cap)
+            detritivore_gain = (c.scavenge_base * (0.3 + 1.2 * decomp_pref)
+                               * handling * available * cons_mult * spec_mult * forage_mult)
+            total_gain += detritivore_gain * has_consume
+
+            # Consume from decomp field proportional to what was eaten
+            consumed = np.minimum(local_decomp * 0.10 * decomp_pref, detritivore_gain * 0.15) * has_consume
+            np.add.at(self.decomposition, (self.rows, self.cols), -consumed)
+            np.clip(self.decomposition, 0, 30.0, out=self.decomposition)
+
+        # ── FORAGE cooperative signal: nearby foragers boost each other ──
+        if has_forage.any():
+            fw = self._module_weights(M_FORAGE)
+            coop_strength = 1.0 / (1.0 + np.exp(-fw[:, 3]))
+            forage_density = np.zeros_like(self.density)
+            fidx = np.where(has_forage)[0]
+            if len(fidx) > 0:
+                np.add.at(forage_density, (self.rows[fidx], self.cols[fidx]), 1)
+            local_foragers = forage_density[self.rows, self.cols].astype(np.float64)
+            coop_bonus = (np.maximum(0, local_foragers - 1) * c.forage_cooperative_bonus
+                         * coop_strength * has_forage)
+            total_gain += coop_bonus
+
+        return total_gain
+
+    # ── Predation (optimized) ──
+
+    def _predation(self):
+        """Predation with DEFENSE integration, per-cell kill cap, satiation.
+        Optimized: pre-rolled randomness, flat spatial index."""
+        c = self.cfg
+        n = self.pop
+        if n < 2:
+            return 0
+
+        N = c.grid_size
+        has_consume = self.module_active[:, M_CONSUME]
+        has_move = self.module_active[:, M_MOVE]
+        has_defense = self.module_active[:, M_DEFENSE]
+        predator_mask = has_consume.copy()
+        if not predator_mask.any():
+            return 0
+
+        uw = self._module_weights(M_CONSUME)
+        aggression = 1.0 / (1.0 + np.exp(-uw[:, 3]))
+        decomp_pref = 1.0 / (1.0 + np.exp(-uw[:, 2]))
+        prey_selectivity = 1.0 / (1.0 + np.exp(-uw[:, 0]))  # 0=herbivore, 1=carnivore
+        has_producer = self.module_active[:, M_PHOTO] | self.module_active[:, M_CHEMO]
+        is_specialist = has_consume & ~has_producer
+        is_omnivore = has_consume & has_producer
+
+        # Precompute DEFENSE stats
+        shell_val = np.zeros(n)
+        camo_val = np.zeros(n)
+        counter_val = np.zeros(n)
+        if has_defense.any():
+            dw = self._module_weights(M_DEFENSE)
+            shell_val = c.defense_shell_max * (1.0 / (1.0 + np.exp(-dw[:, 0]))) * has_defense
+            camo_val = c.defense_camouflage_max * (1.0 / (1.0 + np.exp(-dw[:, 1]))) * has_defense
+            counter_val = c.defense_counter_damage * np.tanh(np.maximum(0, dw[:, 3])) * has_defense
+
+        # Behavioral hijacking suppresses defense (hijacked hosts can't defend)
+        if self.hijack_intensity.any():
+            suppress = self.hijack_intensity * c.hijack_defense_suppress
+            shell_val *= (1.0 - suppress)
+            camo_val *= (1.0 - suppress)
+            counter_val *= (1.0 - suppress)
+
+        # Pre-roll camouflage outcomes: each organism's camo roll for this step
+        camo_rolls = self.rng.random(n)  # compare against camo_val[j] — hidden if roll < camo_val
+
+        # Pre-compute hunt success base for all predators
+        hunt_skill = aggression * (1.0 - 0.5 * decomp_pref)
+        base_prob = c.predation_base_success + hunt_skill * 0.3
+        base_prob += np.where(has_move, 0.08, 0.0)
+        base_prob += np.where(is_specialist, 0.15, 0.0)
+        omni_mult = np.where(is_omnivore, c.producer_consume_penalty, 1.0)
+
+        # Energy fraction for specialists
+        frac_base = np.where(is_specialist,
+                             c.predation_energy_fraction * (1.0 + c.consumer_specialist_bonus),
+                             c.predation_energy_fraction)
+
+        # Flat spatial index: cell_key → sorted organism indices
+        cell_key = self.rows * N + self.cols
+        sort_idx = np.argsort(cell_key)
+        sorted_keys = cell_key[sort_idx]
+        unique_cells, cell_starts, cell_counts = np.unique(
+            sorted_keys, return_index=True, return_counts=True)
+        # Fast lookup: cell → (start, count) in sort_idx
+        cell_start_map = np.full(N * N, -1, dtype=np.int32)
+        cell_count_map = np.zeros(N * N, dtype=np.int32)
+        cell_start_map[unique_cells] = cell_starts.astype(np.int32)
+        cell_count_map[unique_cells] = cell_counts.astype(np.int32)
+
+        kill_mask = np.zeros(n, dtype=bool)
+        cell_kill_count = np.zeros(N * N, dtype=np.int32)
+        satiated = np.zeros(n, dtype=bool)
+        kills = 0
+
+        predator_idx = np.where(predator_mask)[0]
+        self.rng.shuffle(predator_idx)
+
+        # Pre-roll hunt and satiation outcomes
+        hunt_rolls = self.rng.random(len(predator_idx))
+        sat_rolls = self.rng.random(len(predator_idx))
+
+        for pi_idx, pi in enumerate(predator_idx):
+            if kill_mask[pi] or satiated[pi]:
+                continue
+
+            pr, pc = int(self.rows[pi]), int(self.cols[pi])
+            R = c.predation_hunt_radius_mobile if has_move[pi] else c.predation_hunt_radius_base
+
+            # Gather candidates from nearby cells using flat lookup
+            candidates = []
+            r_lo, r_hi = max(0, pr - R), min(N - 1, pr + R)
+            c_lo, c_hi = max(0, pc - R), min(N - 1, pc + R)
+            for cr in range(r_lo, r_hi + 1):
+                for cc_iter in range(c_lo, c_hi + 1):
+                    ck = cr * N + cc_iter
+                    if cell_kill_count[ck] >= c.predation_max_kills_per_cell:
+                        continue
+                    cs = cell_start_map[ck]
+                    if cs < 0:
+                        continue
+                    cnt = cell_count_map[ck]
+                    for si in range(cs, cs + cnt):
+                        j = sort_idx[si]
+                        if j != pi and not kill_mask[j]:
+                            # Camouflage: pre-rolled
+                            if camo_val[j] > 0 and camo_rolls[j] < camo_val[j]:
+                                continue
+                            candidates.append(j)
+
+            if not candidates:
+                continue
+
+            # Target selection: weight by energy AND prey type preference
+            cands = np.array(candidates)
+            target_e = np.maximum(self.energy[cands], 1.0)
+            inv_e = 1.0 / target_e  # prefer weaker prey
+
+            # Prey type preference: herbivores prefer producers, carnivores prefer consumers
+            target_is_producer = has_producer[cands].astype(np.float64)
+            # prey_selectivity[pi]: 0=herbivore, 1=carnivore
+            # herbivore (low selectivity) → weight producers higher
+            # carnivore (high selectivity) → weight consumers higher
+            ps = prey_selectivity[pi]
+            type_weight = np.where(target_is_producer,
+                                   1.0 + (1.0 - ps) * 2.0,  # herbivore bonus for producers
+                                   1.0 + ps * 2.0)            # carnivore bonus for consumers
+            sel_weight = inv_e * type_weight
+            sel_weight /= sel_weight.sum()
+            ti = cands[self.rng.choice(len(cands), p=sel_weight)]
+
+            # Success probability — bonus for matching prey type
+            target_is_prod = has_producer[ti]
+            type_match_bonus = 0.0
+            if target_is_prod and ps < 0.5:
+                type_match_bonus = c.herbivore_producer_bonus * (1.0 - ps)
+            elif not target_is_prod and ps > 0.5:
+                type_match_bonus = c.carnivore_consumer_bonus * ps
+
+            target_difficulty = np.clip(self.energy[ti] / c.energy_max, 0.1, 1.0)
+            prob = (base_prob[pi] - target_difficulty * 0.08) * omni_mult[pi] + type_match_bonus
+            prob -= shell_val[ti]
+            prob = np.clip(prob, 0.01, 0.60)
+
+            if hunt_rolls[pi_idx] < prob:
+                # Energy gain modulated by predator type
+                energy_mult = 1.0
+                if ps < 0.5:
+                    energy_mult = c.herbivore_energy_mult  # herbivores extract more (abundant easy prey)
+                elif ps >= 0.5:
+                    energy_mult = c.carnivore_energy_mult  # carnivores extract less (prey depleted fleeing)
+                gained = max(0.0, self.energy[ti]) * frac_base[pi] * energy_mult
+                self.energy[pi] = min(self.energy[pi] + gained, c.energy_max)
+                self.energy[ti] = -1.0
+                kill_mask[ti] = True
+                cell_kill_count[int(self.rows[ti]) * N + int(self.cols[ti])] += 1
+                kills += 1
+                if sat_rolls[pi_idx] < c.predator_satiation:
+                    satiated[pi] = True
+            else:
+                # Counter-attack on failed hunt
+                if counter_val[ti] > 0:
+                    self.energy[pi] -= counter_val[ti]
+
+        self.total_predation_kills += kills
+        return kills
+
+    # ── Toxic Damage ──
+
+    def _apply_toxic_damage(self, readings):
+        c = self.cfg
+        lt = readings[:, 1]
+        dmg = np.zeros(self.pop)
+
+        # CHEMO tolerance (existing)
+        has_chemo = self.module_active[:, M_CHEMO]
+        chemo_reduction = np.ones(self.pop)
+        if has_chemo.any():
+            ch = self._module_weights(M_CHEMO)
+            tolerance = 0.3 + 0.4 / (1.0 + np.exp(-ch[:, 1]))
+            chemo_reduction[has_chemo] = 1.0 - tolerance[has_chemo]
+
+        # DETOX tolerance (new — raises damage thresholds)
+        has_detox = self.module_active[:, M_DETOX]
+        threshold_boost = np.zeros(self.pop)
+        if has_detox.any():
+            dtw = self._module_weights(M_DETOX)
+            threshold_boost = (c.detox_tolerance_bonus
+                              * (1.0 / (1.0 + np.exp(-dtw[:, 1])))
+                              * has_detox)
+
+        effective = lt * chemo_reduction
+        eff_thresh_med = c.toxic_threshold_medium + threshold_boost
+        eff_thresh_high = c.toxic_threshold_high + threshold_boost
+
+        m = effective > eff_thresh_med
+        if m.any():
+            dmg[m] += (effective[m] - eff_thresh_med[m]) * c.toxic_damage_medium
+        h = effective > eff_thresh_high
+        if h.any():
+            dmg[h] += (effective[h] - eff_thresh_high[h]) * c.toxic_damage_high
+        self.energy -= dmg
+
+    def _apply_detox(self):
+        """DETOX module: metabolize environmental toxins for energy."""
+        c = self.cfg
+        has_detox = self.module_active[:, M_DETOX]
+        if not has_detox.any():
+            return
+
+        dtw = self._module_weights(M_DETOX)
+        detox_eff = c.detox_rate_max * (1.0 / (1.0 + np.exp(-dtw[:, 0])))
+        # selective_uptake: prefer certain toxin concentrations (Michaelis-Menten style)
+        selectivity = 1.0 + np.abs(dtw[:, 3]) * 0.5
+        local_toxic = self.toxic[self.rows, self.cols]
+        uptake_factor = local_toxic / (local_toxic + selectivity)
+
+        # Amount of toxin metabolized
+        metabolized = detox_eff * uptake_factor * has_detox
+
+        # Energy from toxin conversion
+        conversion = c.detox_energy_conversion * (1.0 / (1.0 + np.exp(-dtw[:, 2])))
+        energy_gained = metabolized * conversion * local_toxic
+        self.energy += energy_gained * has_detox
+
+        # Environmental detox: remove toxin from the grid
+        toxin_removed = metabolized * c.detox_environment_effect * local_toxic
+        np.add.at(self.toxic, (self.rows, self.cols), -toxin_removed * has_detox)
+        np.clip(self.toxic, 0, 5.0, out=self.toxic)
+
+    # ── Social System ──
+
+    def _update_social_field(self):
+        """Deposit social identity signals on the grid.
+        Channel 0: producer-type signal (PHOTO/CHEMO organisms)
+        Channel 1: consumer-type signal (CONSUME organisms)
+        Signal strength modulated by SOCIAL module if present."""
+        c = self.cfg
+        n = self.pop
+        self.social_field *= 0.5  # decay old signals
+
+        if n == 0:
+            return
+
+        has_social = self.module_active[:, M_SOCIAL]
+        has_producer = self.module_active[:, M_PHOTO] | self.module_active[:, M_CHEMO]
+        has_consume = self.module_active[:, M_CONSUME]
+
+        # Base signal: all organisms emit weak identity signal
+        base_strength = np.ones(n) * 0.3
+
+        # SOCIAL module amplifies signal
+        if has_social.any():
+            sw = self._module_weights(M_SOCIAL)
+            signal_strength = 1.0 / (1.0 + np.exp(-sw[:, 0]))  # identity_signal weight
+            base_strength = np.where(has_social, 0.3 + 0.7 * signal_strength, base_strength)
+
+        # Deposit producer signal
+        prod_signal = base_strength * has_producer
+        if prod_signal.any():
+            np.add.at(self.social_field[:, :, 0], (self.rows, self.cols), prod_signal)
+
+        # Deposit consumer signal
+        cons_signal = base_strength * has_consume
+        if cons_signal.any():
+            np.add.at(self.social_field[:, :, 1], (self.rows, self.cols), cons_signal)
+
+        np.clip(self.social_field, 0, 10.0, out=self.social_field)
+
+    def _apply_social_interactions(self):
+        """Compatible neighbors build relationship; SOCIAL module accelerates it.
+        ALL organisms accumulate relationship from co-location with complementary types.
+        SOCIAL holders get 5x faster growth + energy bonus."""
+        c = self.cfg
+        n = self.pop
+        if n == 0:
+            return
+
+        has_producer = self.module_active[:, M_PHOTO] | self.module_active[:, M_CHEMO]
+        has_consume = self.module_active[:, M_CONSUME]
+
+        # Local social signals at each organism's cell
+        local_prod = self.social_field[self.rows, self.cols, 0]
+        local_cons = self.social_field[self.rows, self.cols, 1]
+
+        # Compatibility: producers benefit from nearby consumers, consumers from producers
+        compatible_signal = np.zeros(n)
+        compatible_signal += has_producer * local_cons  # producers near consumers
+        compatible_signal += has_consume * local_prod   # consumers near producers
+        compatible_signal += has_producer * local_prod * 0.3  # same-type mild benefit
+        compatible_signal += has_consume * local_cons * 0.2
+
+        # Also: raw co-location signal (even without social field, density = proximity)
+        local_dens = self.density[self.rows, self.cols].astype(np.float64)
+        colocation_signal = np.minimum(local_dens - 1, 3.0)  # neighbors
+        colocation_signal = np.maximum(colocation_signal, 0)
+
+        # SOCIAL module holders: energy bonus + accelerated relationship
+        has_social = self.module_active[:, M_SOCIAL]
+        if has_social.any():
+            sw = self._module_weights(M_SOCIAL)
+            compat_skill = 1.0 / (1.0 + np.exp(-sw[:, 1]))
+            rel_strength = 1.0 / (1.0 + np.exp(-sw[:, 3]))
+            bonus = (c.social_compatibility_bonus * compat_skill
+                    * np.minimum(compatible_signal, 3.0) * has_social)
+            self.energy += bonus
+
+        # Relationship: ALL organisms grow from compatible co-location
+        base_growth = c.social_relationship_growth * 0.6  # meaningful baseline for everyone
+        base_growth_arr = base_growth * np.minimum(compatible_signal + colocation_signal * 0.3, 5.0)
+
+        # Sessile organisms build relationships faster (permanent co-location)
+        has_move_arr = self.module_active[:, M_MOVE]
+        sessile_mult = np.where(has_move_arr, 1.0, 3.0)
+        base_growth_arr *= sessile_mult
+
+        # SOCIAL holders get 5x growth rate
+        if has_social.any():
+            sw = self._module_weights(M_SOCIAL)
+            rel_strength = 1.0 / (1.0 + np.exp(-sw[:, 3]))
+            social_mult = 5.0 * rel_strength * has_social
+            base_growth_arr *= (1.0 + social_mult)
+
+        self.relationship_score *= 0.999  # slower decay (was 0.998)
+        self.relationship_score += base_growth_arr
+        np.clip(self.relationship_score, 0, 10.0, out=self.relationship_score)
+
+    # ── Mediator System (Pollination/Dispersal) ──
+
+    def _update_mediator_field(self):
+        """Mediators deposit pollination service signal on the grid.
+        Higher pollination_drive = stronger signal = more reproduction facilitation."""
+        c = self.cfg
+        n = self.pop
+        self.mediator_field *= c.mediate_network_decay
+
+        if n == 0:
+            return
+
+        has_mediate = self.module_active[:, M_MEDIATE]
+        if not has_mediate.any():
+            return
+
+        mw = self._module_weights(M_MEDIATE)
+        poll_drive = 1.0 / (1.0 + np.exp(-mw[:, 0]))  # pollination_drive
+        network_coord = 1.0 / (1.0 + np.exp(-mw[:, 2]))  # network_coordination
+
+        # Signal strength: base + coordination bonus when multiple mediators nearby
+        local_med = self.mediator_field[self.rows, self.cols]
+        signal = poll_drive * (1.0 + network_coord * np.minimum(local_med, 3.0) * 0.3)
+        signal *= has_mediate
+
+        np.add.at(self.mediator_field, (self.rows, self.cols), signal)
+        np.clip(self.mediator_field, 0, 10.0, out=self.mediator_field)
+
+        # ★ Phase 4 Step 3 link: Mediators near immature organisms earn energy
+        # (developmental support role). This incentivizes mediators to stay near
+        # nurseries and creates a feedback loop: mediators help development,
+        # development helps ecosystem integrity, integrity helps everyone.
+        midx = np.where(has_mediate)[0]
+        if len(midx) > 0 and (~self.is_mature).any():
+            imm_dens = np.zeros((c.grid_size, c.grid_size), dtype=np.float64)
+            imm_idx = np.where(~self.is_mature)[0]
+            np.add.at(imm_dens, (self.rows[imm_idx], self.cols[imm_idx]), 1.0)
+            # Smooth to cover mediate_radius
+            imm_dens = gaussian_filter(imm_dens, sigma=c.mediate_radius, mode='wrap')
+            local_imm = imm_dens[self.rows[midx], self.cols[midx]]
+            self.energy[midx] += c.mediate_passive_reward * np.minimum(local_imm, 3.0)
+
+    # ── Nutrient Cycling ──
+
+    def _apply_nutrient_cycling(self):
+        """Emergent nutrient cycling from module interactions.
+        Not a separate module — organisms with DETOX, CONSUME, and FORAGE
+        contribute to local nutrient chemistry as a side effect."""
+        c = self.cfg
+        n = self.pop
+        if n == 0:
+            return
+
+        # DETOX byproducts → nutrients (detoxification enriches soil)
+        has_detox = self.module_active[:, M_DETOX]
+        if has_detox.any():
+            dtw = self._module_weights(M_DETOX)
+            detox_eff = 1.0 / (1.0 + np.exp(-dtw[:, 0]))
+            conversion = 1.0 / (1.0 + np.exp(-dtw[:, 2]))
+            local_toxic = self.toxic[self.rows, self.cols]
+            deposit = (c.nutrient_detox_deposit * detox_eff * conversion
+                      * np.minimum(local_toxic, 2.0) * has_detox)
+            np.add.at(self.nutrients, (self.rows, self.cols), deposit)
+
+        # CONSUME processing → nutrients (digestion releases nutrients)
+        has_consume = self.module_active[:, M_CONSUME]
+        if has_consume.any():
+            uw = self._module_weights(M_CONSUME)
+            handling = 1.0 / (1.0 + np.exp(-uw[:, 1]))
+            deposit = c.nutrient_consume_deposit * handling * has_consume
+            np.add.at(self.nutrients, (self.rows, self.cols), deposit)
+
+        # FORAGE cooperative clusters boost local nutrient regeneration
+        has_forage = self.module_active[:, M_FORAGE]
+        if has_forage.any():
+            fw = self._module_weights(M_FORAGE)
+            coop_signal = 1.0 / (1.0 + np.exp(-fw[:, 3]))
+            boost = c.nutrient_forage_coop_boost * coop_signal * has_forage
+            np.add.at(self.nutrients, (self.rows, self.cols), boost)
+
+        np.clip(self.nutrients, 0, self.cfg.nutrient_max, out=self.nutrients)
+
+    # ── Behavioral Hijacking ──
+
+    def _compute_hijack_intensity(self):
+        """Compute per-organism hijack intensity from viral load.
+        Returns array of 0-1 values. Called once per step, stored on self."""
+        c = self.cfg
+        n = self.pop
+        self.hijack_intensity = np.zeros(n)
+        if n == 0:
+            return
+
+        # Hijack active when viral_load in range [min, burst_threshold)
+        active = (self.viral_load >= c.hijack_load_min) & (self.viral_load < c.viral_burst_threshold)
+        if not active.any():
+            return
+
+        aidx = np.where(active)[0]
+        load = self.viral_load[aidx]
+
+        # Intensity: ramps from 0 at hijack_load_min to 1 at hijack_load_heavy
+        raw = (load - c.hijack_load_min) / max(c.hijack_load_heavy - c.hijack_load_min, 0.01)
+        intensity = np.clip(raw, 0.0, 1.0)
+
+        # Toxic stress amplifies hijack (stressed hosts easier to control)
+        local_toxic = self.toxic[self.rows[aidx], self.cols[aidx]]
+        stress_mult = 1.0 + local_toxic * c.hijack_stress_amplifier
+        intensity = np.minimum(intensity * stress_mult, 1.0)
+
+        # VRESIST partially resists hijacking
+        has_vresist = self.module_active[aidx, M_VRESIST]
+        if has_vresist.any():
+            vw = self._module_weights(M_VRESIST)
+            breadth = 1.0 / (1.0 + np.exp(-vw[aidx, 2]))
+            memory = np.minimum(self.immune_experience[aidx], 3.0) / 3.0
+            resistance = (breadth * 0.5 + memory * 0.5) * c.hijack_vresist_suppress
+            intensity[has_vresist] *= (1.0 - resistance[has_vresist])
+
+        self.hijack_intensity[aidx] = intensity
+        self.total_hijacked_steps += int(active.sum())
+
+    # ── Endosymbiosis ──
+
+    def _attempt_endosymbiosis(self):
+        """Check for endosymbiotic mergers between co-located compatible organisms.
+        Uses spatial index to find pairs in the same cell."""
+        c = self.cfg
+        n = self.pop
+        if n < 2:
+            return 0
+        N = c.grid_size
+
+        # Eligible: high relationship, sufficient energy, no active infection
+        # SOCIAL not required — relationship builds from co-location
+        # (SOCIAL just accelerates relationship growth)
+        eligible = ((self.relationship_score >= c.endo_relationship_threshold)
+                   & (self.energy >= c.endo_energy_threshold)
+                   & (self.viral_load == 0))
+        if eligible.sum() < 2:
+            return 0
+
+        eidx = np.where(eligible)[0]
+
+        # Local toxic must be in stress window
+        local_toxic = self.toxic[self.rows[eidx], self.cols[eidx]]
+        in_window = (local_toxic >= c.endo_toxic_min) & (local_toxic <= c.endo_toxic_max)
+        eidx = eidx[in_window]
+        if len(eidx) < 2:
+            return 0
+
+        # Group by cell
+        cell_key = self.rows[eidx] * N + self.cols[eidx]
+        sort_order = np.argsort(cell_key)
+        sorted_keys = cell_key[sort_order]
+        sorted_idx = eidx[sort_order]
+
+        mergers_a = []  # index of organism A
+        mergers_b = []  # index of organism B
+        merged_set = set()
+
+        # Find pairs in same cell
+        i = 0
+        while i < len(sorted_keys) - 1:
+            if sorted_keys[i] == sorted_keys[i + 1]:
+                # Same cell — check this pair
+                a, b = int(sorted_idx[i]), int(sorted_idx[i + 1])
+                if a not in merged_set and b not in merged_set:
+                    # Complementarity: count modules that differ
+                    mods_a = self.module_present[a]
+                    mods_b = self.module_present[b]
+                    diff_count = int((mods_a != mods_b).sum())
+                    if diff_count >= c.endo_complementarity_min:
+                        # Merger probability
+                        prob = c.endo_probability
+                        # VRESIST penalty (immune system resists integration)
+                        if self.module_active[a, M_VRESIST] or self.module_active[b, M_VRESIST]:
+                            prob *= (1.0 - c.endo_vresist_penalty)
+                        # Higher relationship → higher probability
+                        rel_avg = (self.relationship_score[a] + self.relationship_score[b]) / 2.0
+                        prob *= min(rel_avg / c.endo_relationship_threshold, 2.0)
+
+                        if self.rng.random() < prob:
+                            mergers_a.append(a)
+                            mergers_b.append(b)
+                            merged_set.add(a)
+                            merged_set.add(b)
+                # Skip to next potential pair
+                i += 2
+            else:
+                i += 1
+
+        if not mergers_a:
+            return 0
+
+        # Execute mergers: create composite organisms
+        nm = len(mergers_a)
+        ma = np.array(mergers_a)
+        mb = np.array(mergers_b)
+
+        # Composite modules: union of both, capped
+        composite_modules = self.module_present[ma] | self.module_present[mb]
+        for i in range(nm):
+            if composite_modules[i].sum() > c.endo_max_modules:
+                # Drop least useful modules (keep energy sources + core)
+                present = np.where(composite_modules[i])[0]
+                # Priority: energy modules > behavioral > metabolic
+                priority = {M_PHOTO: 10, M_CHEMO: 10, M_CONSUME: 10, M_MOVE: 8,
+                           M_TOXPROD: 7, M_FORAGE: 6, M_DEFENSE: 6, M_DETOX: 5,
+                           M_VRESIST: 4, M_SOCIAL: 9, M_MEDIATE: 3}
+                by_pri = sorted(present, key=lambda m: priority.get(m, 0))
+                while composite_modules[i].sum() > c.endo_max_modules:
+                    composite_modules[i, by_pri.pop(0)] = False
+
+        # Blended weights
+        blend = c.endo_weight_blend
+        composite_weights = blend * self.weights[ma] + (1.0 - blend) * self.weights[mb]
+
+        # Composite energy
+        composite_energy = np.minimum(
+            (self.energy[ma] + self.energy[mb]) * c.endo_energy_bonus,
+            c.energy_max)
+
+        # Merger count: max of both + 1
+        composite_merger = np.maximum(self.merger_count[ma], self.merger_count[mb]) + 1
+
+        # Lysogenic: blend
+        composite_lyso_str = np.maximum(self.lysogenic_strength[ma], self.lysogenic_strength[mb])
+        composite_lyso_gen = blend * self.lysogenic_genome[ma] + (1.0 - blend) * self.lysogenic_genome[mb]
+
+        # Create composite organisms
+        composite_ids = np.arange(self.next_id, self.next_id + nm, dtype=np.int64)
+        self.next_id += nm
+
+        self._append_organisms({
+            "rows": self.rows[ma].copy(),
+            "cols": self.cols[ma].copy(),
+            "energy": composite_energy,
+            "age": np.zeros(nm, dtype=np.int32),
+            "generation": np.maximum(self.generation[ma], self.generation[mb]) + 1,
+            "ids": composite_ids,
+            "parent_ids": self.ids[ma],  # track one parent
+            "weights": composite_weights,
+            "module_present": composite_modules,
+            "module_active": composite_modules.copy(),
+            "transfer_count": np.maximum(self.transfer_count[ma], self.transfer_count[mb]),
+            "viral_load": np.zeros(nm, dtype=np.float64),
+            "lysogenic_strength": composite_lyso_str,
+            "lysogenic_genome": composite_lyso_gen,
+            "immune_experience": np.maximum(self.immune_experience[ma], self.immune_experience[mb]),
+            "relationship_score": np.zeros(nm, dtype=np.float64),
+            "merger_count": composite_merger,
+            "module_usage": np.ones((nm, N_MODULES), dtype=np.float64) * composite_modules,
+            # ★ Phase 4: Mergers inherit 50% of worse partner's stress (integration partially resets)
+            "genomic_stress": np.maximum(self.genomic_stress[ma], self.genomic_stress[mb]) * 0.5,
+            "genomic_cascade_phase": np.zeros(nm, dtype=np.int32),  # mergers reset cascade
+            "dev_progress": np.ones(nm, dtype=np.float64),  # composites are mature by definition (already developed)
+            "is_mature": np.ones(nm, dtype=bool),
+        })
+
+        # Remove both partners
+        remove_mask = np.ones(self.pop - nm, dtype=bool)  # pop already increased by append
+        # We need to mark the ORIGINAL indices for removal
+        # Since append added nm organisms at the end, original indices are still valid
+        old_pop = self.pop - nm
+        keep = np.ones(old_pop, dtype=bool)
+        keep[ma] = False
+        keep[mb] = False
+        # But we also want to keep the newly appended ones
+        full_keep = np.concatenate([keep, np.ones(nm, dtype=bool)])
+        self._filter_organisms(full_keep)
+
+        self.total_mergers += nm
+        return nm
+
+    # ── Movement ──
+
+    def _decide_movement(self, readings):
+        n = self.pop
+        if n == 0:
+            return np.array([], dtype=np.int32)
+
+        has_move = self.module_active[:, M_MOVE]
+        has_photo = self.module_active[:, M_PHOTO]
+        has_chemo = self.module_active[:, M_CHEMO]
+        has_consume = self.module_active[:, M_CONSUME]
+        mp = self._module_weights(M_MOVE)
+
+        sc = np.zeros((n, 5))
+
+        # Stay score: nutrient attraction + decomp attraction for consumers
+        sc[:, 0] = (mp[:, 5] + mp[:, 2] * readings[:, 2]
+                    - mp[:, 1] * np.minimum(readings[:, 3], 10) * 0.1)
+        if has_consume.any():
+            sc[:, 0] += has_consume * readings[:, 8] * 0.3
+
+        # Gradient weights
+        light_w = mp[:, 6] * has_photo.astype(np.float64)
+        net_toxic = mp[:, 7] * has_photo.astype(np.float64) - mp[:, 3] * has_chemo.astype(np.float64)
+
+        # Consumer-specific: carnivores→density, detritivores→scent
+        consume_dens_w = np.zeros(n)
+        consume_scent_w = np.zeros(n)
+        if has_consume.any():
+            uw = self._module_weights(M_CONSUME)
+            dp = 1.0 / (1.0 + np.exp(-uw[:, 2]))
+            consume_dens_w = has_consume * (1.0 - dp) * 0.5
+            consume_scent_w = has_consume * dp * 8.0
+
+        # FORAGE: seek nutrient-rich areas
+        has_forage = self.module_active[:, M_FORAGE]
+        forage_nutr_w = np.zeros(n)
+        if has_forage.any():
+            fw = self._module_weights(M_FORAGE)
+            resource_discrim = 1.0 / (1.0 + np.exp(-fw[:, 1]))
+            forage_nutr_w = has_forage * resource_discrim * 2.0
+
+        # DETOX: seek toxic areas (food source)
+        has_detox = self.module_active[:, M_DETOX]
+        detox_toxic_w = np.zeros(n)
+        if has_detox.any():
+            dtw = self._module_weights(M_DETOX)
+            detox_seek = 1.0 / (1.0 + np.exp(-dtw[:, 0]))
+            detox_toxic_w = has_detox * detox_seek * 1.5
+
+        # SOCIAL: seek compatible organisms via social signal gradients
+        has_social = self.module_active[:, M_SOCIAL]
+        social_compat_gy = np.zeros(n)
+        social_compat_gx = np.zeros(n)
+        if has_social.any():
+            sw = self._module_weights(M_SOCIAL)
+            approach = np.tanh(sw[:, 2])  # approach_avoidance: positive = approach
+            has_producer = self.module_active[:, M_PHOTO] | self.module_active[:, M_CHEMO]
+
+            # Producers follow consumer signal gradients (seek metabolic complement)
+            # Consumers follow producer signal gradients
+            # readings 17-20: social gradients
+            spg_y, spg_x = readings[:, 17], readings[:, 18]  # producer signal gradients
+            scg_y, scg_x = readings[:, 19], readings[:, 20]  # consumer signal gradients
+
+            # Each organism seeks the complementary type
+            compat_gy = np.where(has_producer, scg_y, spg_y) * has_social
+            compat_gx = np.where(has_producer, scg_x, spg_x) * has_social
+            # Also mild attraction to same-type (cooperative)
+            same_gy = np.where(has_producer, spg_y, scg_y) * has_social * 0.3
+            same_gx = np.where(has_producer, spg_x, scg_x) * has_social * 0.3
+
+            social_compat_gy = approach * (compat_gy + same_gy) * 1.5
+            social_compat_gx = approach * (compat_gx + same_gx) * 1.5
+
+        # MEDIATE: seek organism-dense areas (go where pollination is needed)
+        has_mediate = self.module_active[:, M_MEDIATE]
+        mediate_dens_gy = np.zeros(n)
+        mediate_dens_gx = np.zeros(n)
+        if has_mediate.any():
+            mew = self._module_weights(M_MEDIATE)
+            route_mem = 1.0 / (1.0 + np.exp(-mew[:, 1]))  # route_memory
+            # Mediators seek social signal gradients (where organisms are)
+            # Combined producer+consumer social signal as target
+            spg_y, spg_x = readings[:, 17], readings[:, 18]
+            scg_y, scg_x = readings[:, 19], readings[:, 20]
+            mediate_dens_gy = has_mediate * (spg_y + scg_y) * (0.5 + route_mem) * 2.0
+            mediate_dens_gx = has_mediate * (spg_x + scg_x) * (0.5 + route_mem) * 2.0
+
+        # Directional scores
+        lg_y, lg_x = readings[:, 4], readings[:, 5]
+        tg_y, tg_x = readings[:, 6], readings[:, 7]
+        dg_y, dg_x = readings[:, 9], readings[:, 10]
+        sg_y, sg_x = readings[:, 11], readings[:, 12]
+        ng_y, ng_x = readings[:, 13], readings[:, 14]
+
+        gy = (light_w * lg_y - net_toxic * tg_y + consume_dens_w * dg_y
+              + consume_scent_w * sg_y + forage_nutr_w * ng_y + detox_toxic_w * tg_y
+              + social_compat_gy + mediate_dens_gy)
+        gx = (light_w * lg_x - net_toxic * tg_x + consume_dens_w * dg_x
+              + consume_scent_w * sg_x + forage_nutr_w * ng_x + detox_toxic_w * tg_x
+              + social_compat_gx + mediate_dens_gx)
+        sc[:, 1] = gy;  sc[:, 2] = -gy
+        sc[:, 3] = gx;  sc[:, 4] = -gx
+
+        # Behavioral hijacking: override movement for infected organisms
+        hijacked = self.hijack_intensity > 0.1
+        if hijacked.any():
+            hidx = np.where(hijacked)[0]
+            hi = self.hijack_intensity[hidx]
+            # Hijacked organisms seek high-density, low-viral areas (spread virus to new hosts)
+            hijack_gy = (readings[hidx, 9] * self.cfg.hijack_density_seek   # toward density
+                        - readings[hidx, 6] * 1.0)                    # away from existing viral zones
+            hijack_gx = (readings[hidx, 10] * self.cfg.hijack_density_seek
+                        - readings[hidx, 7] * 1.0)
+            # Blend: hijack overrides host movement proportional to intensity
+            sc[hidx, 0] *= (1.0 - hi * 0.8)  # suppress stay tendency
+            sc[hidx, 1] = sc[hidx, 1] * (1.0 - hi) + hijack_gy * hi
+            sc[hidx, 2] = sc[hidx, 2] * (1.0 - hi) - hijack_gy * hi
+            sc[hidx, 3] = sc[hidx, 3] * (1.0 - hi) + hijack_gx * hi
+            sc[hidx, 4] = sc[hidx, 4] * (1.0 - hi) - hijack_gx * hi
+            # Heavy hijack: erratic movement noise
+            heavy = hi > 0.7
+            if heavy.any():
+                hh = hidx[heavy]
+                sc[hh, 1:] += self.rng.normal(0, 2.0, (len(hh), 4))
+
+        # Exploration noise
+        sc += mp[:, 4:5] * self.rng.normal(0, 0.3, (n, 5))
+
+        # Sessile organisms stay
+        sc[~has_move, 1:] = -999.0
+
+        return np.argmax(sc, axis=1)
+
+    def _execute_movement(self, actions):
+        N = self.cfg.grid_size
+        m = actions == 1; self.rows[m] = np.maximum(0, self.rows[m] - 1)
+        m = actions == 2; self.rows[m] = np.minimum(N - 1, self.rows[m] + 1)
+        m = actions == 3; self.cols[m] = np.minimum(N - 1, self.cols[m] + 1)
+        m = actions == 4; self.cols[m] = np.maximum(0, self.cols[m] - 1)
+        self.energy[actions > 0] -= self.cfg.energy_movement_cost
+
+    # ── Horizontal Transfer ──
+
+    def _horizontal_transfer(self):
+        c = self.cfg
+        n = self.pop
+        if n == 0:
+            return
+
+        sp = self._standalone_params()
+        receptivity = 1.0 / (1.0 + np.exp(-sp[:, SP_TRANSFER_RECEPTIVITY]))
+        selectivity = np.abs(sp[:, SP_TRANSFER_SELECTIVITY])
+        local_toxic = self.toxic[self.rows, self.cols]
+
+        # Fungal network boost: organisms near fungi receive material more easily
+        # ★ Phase 4 Step 5: Fungal HGT transport boost.
+        # Organisms standing on fungal tissue get up to +0.3 transfer receptivity.
+        # This means genome fragments from dead organisms travel along fungal
+        # networks and are more readily absorbed by living organisms on the network.
+        local_fungal = self.fungal_density[self.rows, self.cols]
+        fungal_boost = np.minimum(local_fungal * c.fungal_hgt_transport, 0.3)
+        receptivity = np.minimum(receptivity + fungal_boost, 1.0)
+
+        can_recent = np.ones(n, dtype=bool)
+        can_intermediate = local_toxic >= c.stratum_access_medium
+        can_ancient = local_toxic >= c.stratum_access_high
+
+        for sname, access_mask, blend_rate in [
+            ("recent",       can_recent,       c.transfer_blend_rate_recent),
+            ("intermediate", can_intermediate,  c.transfer_blend_rate_intermediate),
+            ("ancient",      can_ancient,       c.transfer_blend_rate_ancient),
+        ]:
+            sw = self.strata_weight[sname]
+            local_sw = sw[self.rows, self.cols]
+            eligible = access_mask & (local_sw > 0.1) & (self.rng.random(n) < receptivity)
+            eidx = np.where(eligible)[0]
+            if len(eidx) == 0:
+                continue
+
+            local_frags = self.strata_pool[sname][self.rows[eidx], self.cols[eidx]]
+            dists = np.sqrt(np.mean((self.weights[eidx] - local_frags) ** 2, axis=1))
+            depth_factor = {"recent": 1.0, "intermediate": 1.5, "ancient": 2.5}[sname]
+            thresh = (2.0 * depth_factor) / (1.0 + selectivity[eidx])
+            tidx = eidx[dists < thresh]
+            if len(tidx) == 0:
+                continue
+
+            frags = self.strata_pool[sname][self.rows[tidx], self.cols[tidx]]
+            self.weights[tidx] = (1.0 - blend_rate) * self.weights[tidx] + blend_rate * frags
+            self.transfer_count[tidx] += 1
+            self.total_transfers += len(tidx)
+            self.transfers_by_stratum[sname] += len(tidx)
+
+            # ★ Phase 4 Step 2 link: each HGT event adds genomic stress.
+            # Deeper strata = more incompatible DNA = more stress:
+            # recent (1.0×) → intermediate (1.5×) → ancient (2.5×).
+            # This is the input that drives the genomic cascade system.
+            stratum_mult = {"recent": 1.0, "intermediate": 1.5, "ancient": 2.5}
+            self.genomic_stress[tidx] += c.genomic_stress_per_transfer * stratum_mult.get(sname, 1.0)
+
+            # Module acquisition via HGT
+            if self.rng.random() < 0.5:
+                frag_mods = self.strata_modules[sname][self.rows[tidx], self.cols[tidx]]
+                for i, ti in enumerate(tidx):
+                    if self.rng.random() < c.module_transfer_rate:
+                        available = [gm for gm in GAINABLE_MODULES
+                                    if frag_mods[i, gm] > 0.3 and not self.module_present[ti, gm]]
+                        if available:
+                            self.module_present[ti, self.rng.choice(available)] = True
+                            self.module_active[ti] = self.module_present[ti]
+
+    # ── Viral Dynamics (VRESIST-enhanced) ──
+
+    def _viral_dynamics(self):
+        """Viral infection, lytic damage, lysogenic activation.
+        VRESIST module provides much stronger resistance with specificity/breadth trade-off.
+        Organisms without VRESIST use weaker standalone params as fallback."""
+        c = self.cfg
+        n = self.pop
+        if n == 0:
+            return
+
+        sp = self._standalone_params()
+        has_vresist = self.module_active[:, M_VRESIST]
+        local_viral = self.viral_particles[self.rows, self.cols]
+        local_toxic = self.toxic[self.rows, self.cols]
+
+        # Compute viral resistance: VRESIST module vs standalone fallback
+        # Standalone: weak baseline resistance (~0.3 effective)
+        base_resistance = 0.3 * (1.0 / (1.0 + np.exp(-sp[:, SP_VIRAL_RESISTANCE])))
+
+        if has_vresist.any():
+            vw = self._module_weights(M_VRESIST)
+            specificity = 1.0 / (1.0 + np.exp(-vw[:, 0]))  # targeted resistance
+            breadth = 1.0 / (1.0 + np.exp(-vw[:, 2]))      # broad resistance
+            # Specificity/breadth trade-off: can't max both
+            # Specificity good in stable environments; breadth good against novel strains
+            vresist_resist = (c.vresist_base_resistance
+                            + c.vresist_specificity_bonus * specificity
+                            + c.vresist_breadth_bonus * breadth)
+            # Immune memory from past infections boosts resistance
+            memory_boost = (c.vresist_memory_boost
+                          * (1.0 / (1.0 + np.exp(-vw[:, 3])))  # immune_memory weight
+                          * np.minimum(self.immune_experience, 3.0))
+            vresist_resist = np.minimum(vresist_resist + memory_boost, 0.95)
+            # Merge: VRESIST organisms use module resistance, others use standalone
+            viral_resistance = np.where(has_vresist, vresist_resist, base_resistance)
+        else:
+            viral_resistance = base_resistance
+
+        # Compute lysogenic suppression: VRESIST enhances
+        base_suppression = 0.3 * (1.0 / (1.0 + np.exp(-sp[:, SP_LYSO_SUPPRESSION])))
+        if has_vresist.any():
+            vw = self._module_weights(M_VRESIST)
+            vresist_supp = c.vresist_suppression_max * (1.0 / (1.0 + np.exp(-vw[:, 1])))
+            lysogenic_suppression = np.where(has_vresist, vresist_supp, base_suppression)
+        else:
+            lysogenic_suppression = base_suppression
+
+        # Immune memory decay
+        self.immune_experience *= c.vresist_memory_decay
+
+        # New infections
+        candidates = (self.viral_load == 0) & (local_viral > 0.05)
+        if candidates.any():
+            cidx = np.where(candidates)[0]
+            inf_prob = (c.viral_infection_rate * np.minimum(local_viral[cidx], 5.0) / 5.0
+                       * (1.0 - viral_resistance[cidx]))
+            inf_prob = np.maximum(inf_prob, 0.01)  # minimum infection chance
+            infected = cidx[self.rng.random(len(cidx)) < inf_prob]
+
+            if len(infected) > 0:
+                lyso_rolls = self.rng.random(len(infected))
+                lytic = infected[lyso_rolls >= c.lysogenic_probability]
+                lysogenic = infected[lyso_rolls < c.lysogenic_probability]
+
+                if len(lytic) > 0:
+                    self.viral_load[lytic] = 0.1
+                if len(lysogenic) > 0:
+                    vgw = self.viral_genome_weight[self.rows[lysogenic], self.cols[lysogenic]]
+                    has_mat = vgw > 0.01
+                    lwm = lysogenic[has_mat]
+                    if len(lwm) > 0:
+                        vg = self.viral_genome_pool[self.rows[lwm], self.cols[lwm]]
+                        new_str = self.lysogenic_strength[lwm] + 0.3
+                        blend = 0.3 / np.maximum(new_str, 0.01)
+                        self.lysogenic_genome[lwm] = (
+                            self.lysogenic_genome[lwm] * (1.0 - blend[:, None])
+                            + vg * blend[:, None])
+                        self.lysogenic_strength[lwm] = new_str
+                        self.total_lysogenic_integrations += len(lwm)
+
+        # Lytic damage + immune experience from surviving
+        lytic_mask = self.viral_load > 0
+        if lytic_mask.any():
+            lidx = np.where(lytic_mask)[0]
+            self.viral_load[lidx] += c.viral_lytic_growth
+            self.energy[lidx] -= c.viral_lytic_damage * self.viral_load[lidx]
+
+            # Organisms that survive lytic infection gain immune experience
+            # (viral_load will be cleared by death; survivors keep accumulating)
+            survivors = lidx[self.energy[lidx] > 0]
+            if len(survivors) > 0:
+                self.immune_experience[survivors] += 0.05
+
+        # Lysogenic activation under stress (suppression from VRESIST)
+        act_cand = ((self.lysogenic_strength > 0.01) &
+                    (local_toxic > c.lysogenic_activation_toxic) &
+                    (self.viral_load == 0))
+        if act_cand.any():
+            acidx = np.where(act_cand)[0]
+            stress = (local_toxic[acidx] - c.lysogenic_activation_toxic) / c.lysogenic_activation_toxic
+            act_prob = np.minimum(stress * 0.3, 0.5) * (1.0 - lysogenic_suppression[acidx])
+            activated = acidx[self.rng.random(len(acidx)) < act_prob]
+            if len(activated) > 0:
+                blend = np.minimum(c.lysogenic_blend_rate * self.lysogenic_strength[activated], 0.4)
+                self.weights[activated] = (
+                    self.weights[activated] * (1.0 - blend[:, None])
+                    + self.lysogenic_genome[activated] * blend[:, None])
+                self.viral_load[activated] = 0.2
+                self.lysogenic_strength[activated] *= 0.3
+                self.total_lysogenic_activations += len(activated)
+
+    # ── Reproduction ──
+
+    def _reproduce(self):
+        c = self.cfg
+        N = c.grid_size
+
+        # Density-dependent threshold: harder to reproduce in crowded areas
+        local_dens = self.density[self.rows, self.cols].astype(np.float64)
+        effective_threshold = c.energy_reproduction_threshold + local_dens * c.repro_density_penalty
+
+        # Mediator bonus: pollination service lowers reproduction threshold
+        local_med = self.mediator_field[self.rows, self.cols]
+        mediator_bonus = np.minimum(local_med, 3.0) * c.mediate_repro_bonus
+        effective_threshold -= mediator_bonus
+
+        # Collapse zone penalty: sigmoid reproduction suppression
+        # ★ Phase 4 Step 4: Collapse zone reproduction penalty (sigmoid).
+        collapse_mod = self._collapse_reproduction_modifier()
+        # Convert modifier (0-1) to threshold increase: low modifier = high threshold
+        effective_threshold /= np.maximum(collapse_mod, 0.1)
+
+        can = ((self.energy >= effective_threshold) &
+               (self.age >= c.min_reproduction_age) &
+               (self.viral_load == 0))
+        pidx = np.where(can)[0]
+        nb = len(pidx)
+        if nb == 0:
+            return
+
+        self.energy[pidx] -= c.energy_reproduction_cost
+
+        # Reward mediators near reproduction events
+        if nb > 0:
+            has_mediate = self.module_active[:, M_MEDIATE]
+            if has_mediate.any():
+                mw = self._module_weights(M_MEDIATE)
+                reward_sens = 1.0 / (1.0 + np.exp(-mw[:, 3]))  # reward_sensitivity
+                local_repro_signal = np.zeros(self.pop)
+                # Count reproductions at each mediator's location
+                repro_cells = set(zip(self.rows[pidx].tolist(), self.cols[pidx].tolist()))
+                for mi in np.where(has_mediate)[0]:
+                    r, col = self.rows[mi], self.cols[mi]
+                    # Check within mediate_radius
+                    nearby_repros = sum(1 for rr, cc in repro_cells
+                                       if abs(rr - r) <= c.mediate_radius
+                                       and abs(cc - col) <= c.mediate_radius)
+                    if nearby_repros > 0:
+                        self.energy[mi] += (c.mediate_energy_reward * reward_sens[mi]
+                                          * min(nearby_repros, 5))
+        child_ids = np.arange(self.next_id, self.next_id + nb, dtype=np.int64)
+        self.next_id += nb
+
+        child_modules = self.module_present[pidx].copy()
+
+        # Module gain
+        gain_rolls = self.rng.random(nb)
+        for i in np.where(gain_rolls < c.module_gain_rate)[0]:
+            absent = [gm for gm in GAINABLE_MODULES if not child_modules[i, gm]]
+            if absent:
+                child_modules[i, self.rng.choice(absent)] = True
+
+        # Module loss (protect last energy module)
+        lose_rolls = self.rng.random(nb)
+        for i in np.where(lose_rolls < c.module_lose_rate)[0]:
+            present = np.where(child_modules[i])[0]
+            droppable = []
+            for m in present:
+                if m == M_TOXPROD:
+                    continue
+                if m in (M_PHOTO, M_CHEMO, M_CONSUME):
+                    if not any(child_modules[i, e] for e in (M_PHOTO, M_CHEMO, M_CONSUME) if e != m):
+                        continue
+                droppable.append(m)
+            if droppable:
+                child_modules[i, self.rng.choice(droppable)] = False
+
+        # Offspring placement
+        has_move_p = self.module_active[pidx, M_MOVE]
+        off_dist = np.where(has_move_p, c.offspring_distance, 1)
+        row_off = np.round(self.rng.uniform(-1, 1, nb) * off_dist).astype(np.int64)
+        col_off = np.round(self.rng.uniform(-1, 1, nb) * off_dist).astype(np.int64)
+
+        # Decomp-seeking offspring: detritivore children seek carrion via scent
+        has_consume_p = self.module_active[pidx, M_CONSUME]
+        if has_consume_p.any():
+            uw = self._module_weights(M_CONSUME)
+            dp_pref = 1.0 / (1.0 + np.exp(-uw[pidx, 2]))
+            seekers = np.where(has_consume_p & (dp_pref > 0.4))[0]
+            if len(seekers) > 0:
+                search_r = 8
+                for i in seekers:
+                    pr, pc = int(self.rows[pidx[i]]), int(self.cols[pidx[i]])
+                    r_lo = max(0, pr - search_r)
+                    r_hi = min(N - 1, pr + search_r)
+                    c_lo = max(0, pc - search_r)
+                    c_hi = min(N - 1, pc + search_r)
+                    # Sample scent in search area (step by 2 for speed)
+                    patch = self.decomp_scent[r_lo:r_hi+1:2, c_lo:c_hi+1:2]
+                    if patch.size > 0 and patch.max() > 0.01:
+                        best = np.unravel_index(patch.argmax(), patch.shape)
+                        row_off[i] = r_lo + best[0] * 2 - pr
+                        col_off[i] = c_lo + best[1] * 2 - pc
+
+        child_weights = self.weights[pidx] + self.rng.normal(0, c.mutation_rate, (nb, TOTAL_WEIGHT_PARAMS))
+
+        # ── Reproductive Manipulation (Wolbachia-style) ──
+        # Lysogenic viral material in parents silently biases offspring
+        parent_lyso = self.lysogenic_strength[pidx]
+        manipulated = parent_lyso > c.repro_manip_threshold
+        n_manipulated = int(manipulated.sum())
+
+        if n_manipulated > 0:
+            midx = np.where(manipulated)[0]
+            parent_lyso_genome = self.lysogenic_genome[pidx[midx]]
+            manip_strength = np.minimum(parent_lyso[midx], 2.0) / 2.0  # normalize to 0-1
+
+            # Self-limiting: manipulation weakens at high population penetration
+            pop_lyso_frac = (self.lysogenic_strength > c.repro_manip_threshold).sum() / max(self.pop, 1)
+            if pop_lyso_frac > c.repro_manip_saturation:
+                saturation_penalty = (pop_lyso_frac - c.repro_manip_saturation) / (1.0 - c.repro_manip_saturation)
+                manip_strength *= (1.0 - saturation_penalty * 0.8)
+
+            # 1. Trait bias: blend offspring weights toward lysogenic genome
+            trait_blend = c.repro_manip_trait_bias * manip_strength
+            child_weights[midx] = (child_weights[midx] * (1.0 - trait_blend[:, None])
+                                  + parent_lyso_genome * trait_blend[:, None])
+
+            # 2. Receptivity boost: make offspring more susceptible to HGT
+            recept_idx = STANDALONE_OFFSET + SP_TRANSFER_RECEPTIVITY
+            child_weights[midx, recept_idx] += c.repro_manip_receptivity_boost * manip_strength
+
+            # 3. Viability filter: penalize offspring that diverge from lysogenic template
+            divergence = np.sqrt(np.mean((child_weights[midx] - parent_lyso_genome) ** 2, axis=1))
+            penalty_mask = divergence > c.repro_manip_divergence_thresh
+            if penalty_mask.any():
+                pen_idx = midx[penalty_mask]
+                pen_strength = manip_strength[penalty_mask]
+                energy_penalty = c.repro_manip_viability_cost * pen_strength * \
+                    (divergence[penalty_mask] - c.repro_manip_divergence_thresh)
+                # Store penalty to apply to offspring energy below
+                # (offspring energy set to energy_initial, so we reduce it)
+                child_energy = np.full(nb, c.energy_initial)
+                child_energy[pen_idx] -= energy_penalty
+                np.clip(child_energy, 5.0, c.energy_initial, out=child_energy)
+            else:
+                child_energy = np.full(nb, c.energy_initial)
+
+            self.total_manipulated_births += n_manipulated
+        else:
+            child_energy = np.full(nb, c.energy_initial)
+
+        # Create offspring with inherited + fresh Phase 4 fields:
+        # module_usage: starts at 1.0 for present modules (full assumed usefulness)
+        # genomic_stress: inherits 30% from parent (epigenetic memory of chimeric history)
+        # genomic_cascade_phase: 0 (babies start clean, no cascade)
+        # dev_progress: 0 (babies start immature — must develop with neighbors)
+        # is_mature: False (maturation through developmental dependency system)
+        self._append_organisms({
+            "rows": np.clip(self.rows[pidx] + row_off, 0, N - 1),
+            "cols": np.clip(self.cols[pidx] + col_off, 0, N - 1),
+            "energy": child_energy,
+            "age": np.zeros(nb, dtype=np.int32),
+            "generation": self.generation[pidx] + 1,
+            "ids": child_ids,
+            "parent_ids": self.ids[pidx],
+            "weights": child_weights,
+            "module_present": child_modules,
+            "module_active": child_modules.copy(),
+            "transfer_count": np.zeros(nb, dtype=np.int32),
+            "viral_load": np.zeros(nb, dtype=np.float64),
+            "lysogenic_strength": self.lysogenic_strength[pidx] * c.lysogenic_inheritance,
+            "lysogenic_genome": self.lysogenic_genome[pidx] * c.lysogenic_inheritance,
+            "immune_experience": self.immune_experience[pidx] * 0.3,  # partial maternal immunity
+            "relationship_score": np.zeros(nb, dtype=np.float64),     # fresh start
+            "merger_count": self.merger_count[pidx].copy(),           # inherit merger history
+            "module_usage": np.ones((nb, N_MODULES), dtype=np.float64) * child_modules,  # full usage for present modules
+            "genomic_stress": self.genomic_stress[pidx] * 0.3,  # inherit partial stress (epigenetic memory)
+            "genomic_cascade_phase": np.zeros(nb, dtype=np.int32),  # babies start clean
+            "dev_progress": np.zeros(nb, dtype=np.float64),  # babies start immature
+            "is_mature": np.zeros(nb, dtype=bool),
+        })
+
+    # ── Death and Decomposition ──
+
+    def _kill_and_decompose(self):
+        c = self.cfg
+        N = c.grid_size
+
+        bursting = self.viral_load >= c.viral_burst_threshold
+        natural_death = (self.energy <= 0) | (self.age >= c.max_age)
+        dead = bursting | natural_death
+
+        if dead.any():
+            dr, dc = self.rows[dead], self.cols[dead]
+            de = np.maximum(0, self.energy[dead])
+            dw, dm = self.weights[dead], self.module_present[dead]
+
+            # Deposit decomp
+            np.add.at(self.decomposition, (dr, dc), de * c.nutrient_from_decomp + c.decomp_death_deposit)
+
+            # Nutrient cycling: dead organisms release nutrients proportional to module complexity
+            module_complexity = dm.sum(axis=1).astype(np.float64)
+            nutrient_deposit = module_complexity * c.nutrient_death_per_module
+            np.add.at(self.nutrients, (dr, dc), nutrient_deposit)
+
+            # Update strata with dead organism genomes
+            cell_ids = dr * N + dc
+            unique_cells, inverse = np.unique(cell_ids, return_inverse=True)
+            nc = len(unique_cells)
+            weight_sums = np.zeros((nc, TOTAL_WEIGHT_PARAMS))
+            module_sums = np.zeros((nc, N_MODULES))
+            counts = np.zeros(nc)
+            np.add.at(weight_sums, inverse, dw)
+            np.add.at(module_sums, inverse, dm.astype(np.float64))
+            np.add.at(counts, inverse, 1.0)
+            ur, uc = unique_cells // N, unique_cells % N
+
+            wt = self.strata_weight["recent"][ur, uc] + counts
+            blend = counts / wt
+            avg_w = weight_sums / counts[:, None]
+            avg_m = module_sums / counts[:, None]
+            self.strata_pool["recent"][ur, uc] = (
+                self.strata_pool["recent"][ur, uc] * (1.0 - blend[:, None])
+                + avg_w * blend[:, None])
+            self.strata_modules["recent"][ur, uc] = (
+                self.strata_modules["recent"][ur, uc] * (1.0 - blend[:, None])
+                + avg_m * blend[:, None])
+            self.strata_weight["recent"][ur, uc] = wt
+
+            # Viral burst
+            burst_mask = self.viral_load[dead] >= c.viral_burst_threshold
+            if burst_mask.any():
+                br, bc, bg = dr[burst_mask], dc[burst_mask], dw[burst_mask]
+                self.total_lytic_deaths += len(br)
+                for i in range(len(br)):
+                    r0 = max(0, br[i] - c.viral_burst_radius)
+                    r1 = min(N, br[i] + c.viral_burst_radius + 1)
+                    c0 = max(0, bc[i] - c.viral_burst_radius)
+                    c1 = min(N, bc[i] + c.viral_burst_radius + 1)
+                    area = (r1 - r0) * (c1 - c0)
+                    self.viral_particles[r0:r1, c0:c1] += c.viral_burst_amount / area
+                    w_old = self.viral_genome_weight[r0:r1, c0:c1]
+                    w_add = c.viral_burst_amount / area
+                    w_new = w_old + w_add
+                    blend_v = w_add / np.maximum(w_new, 1e-8)
+                    self.viral_genome_pool[r0:r1, c0:c1] = (
+                        self.viral_genome_pool[r0:r1, c0:c1] * (1.0 - blend_v[:, :, None])
+                        + bg[i][None, None, :] * blend_v[:, :, None])
+                    self.viral_genome_weight[r0:r1, c0:c1] = w_new
+
+            # Spontaneous viral shedding from natural deaths
+            nat_dead = ~burst_mask
+            if nat_dead.any():
+                spont = self.rng.random(int(nat_dead.sum())) < 0.15
+                if spont.any():
+                    nat_idx = np.where(nat_dead)[0][spont]
+                    np.add.at(self.viral_particles, (dr[nat_idx], dc[nat_idx]), 1.0)
+                    np.add.at(self.viral_genome_weight, (dr[nat_idx], dc[nat_idx]), 1.0)
+
+        self._filter_organisms(~dead)
+
+    # ── Capacity Shedding (Phase 4 Step 1) ──
+    # Two-method system: _update_module_usage computes relevance scores,
+    # then _apply_capacity_shedding handles state transitions.
+    # Pipeline: active → dormant (deactivate_threshold) → lost (loss_threshold)
+    # Stress reactivation: dormant modules wake up in toxic/viral environments.
+    # Last energy source is always protected (can't shed your only way to eat).
+
+    def _update_module_usage(self, readings):
+        """Update per-module usage scores based on environmental relevance.
+        Modules that are useful in current conditions gain usage.
+        All present modules decay. Low usage → dormancy → loss."""
+        c = self.cfg
+        n = self.pop
+        if n == 0:
+            return
+
+        local_light = readings[:, 0]
+        local_toxic = readings[:, 1]
+        local_density = readings[:, 3]
+        local_decomp = readings[:, 8]
+
+        # Relevance signals: environment-specific usefulness for each module.
+        # PHOTO: needs light > 0.5 AND low toxicity. Dark/toxic zones → irrelevant.
+        # CHEMO: needs toxicity > 0.3. Clean zones → irrelevant.
+        # CONSUME: scales with local density (more neighbors = more prey).
+        # MOVE: high relevance when crowded (need to escape), low when sparse.
+        # FORAGE: needs nutrient-rich soil. Barren zones → irrelevant.
+        # DEFENSE: scales with density (more neighbors = more predator risk).
+        # DETOX: needs toxicity > 0.3. Clean zones → irrelevant.
+        # TOXPROD: always 1.0 (structural, never sheds).
+        # VRESIST: scales with viral particle density (10× amplified).
+        # SOCIAL/MEDIATE: scale with density (need neighbors to interact with).
+        relevance = np.zeros((n, N_MODULES), dtype=np.float64)
+        relevance[:, M_PHOTO] = (local_light > 0.5).astype(np.float64) * (local_toxic < 0.5).astype(np.float64)
+        relevance[:, M_CHEMO] = (local_toxic > 0.3).astype(np.float64)
+        relevance[:, M_CONSUME] = np.minimum(local_density * 0.3, 1.0)
+        relevance[:, M_MOVE] = np.where(local_density > 2, 0.8, 0.2)  # crowded = need to move
+        relevance[:, M_FORAGE] = (self.nutrients[self.rows, self.cols] > 1.0).astype(np.float64)
+        relevance[:, M_DEFENSE] = np.minimum(local_density * 0.3, 1.0)  # relevant when crowded (predator risk)
+        relevance[:, M_DETOX] = (local_toxic > 0.3).astype(np.float64)
+        relevance[:, M_TOXPROD] = 1.0  # always relevant (never sheds)
+        relevance[:, M_VRESIST] = np.minimum(
+            self.viral_particles[self.rows, self.cols] * 10.0, 1.0)
+        relevance[:, M_SOCIAL] = np.minimum(local_density * 0.4, 1.0)   # any neighbor helps
+        relevance[:, M_MEDIATE] = np.minimum(local_density * 0.35, 1.0)  # pollinators useful near any life
+
+        # Gain: active modules in relevant conditions gain usage
+        gain = c.shedding_usage_gain * relevance * self.module_active
+        self.module_usage += gain
+
+        # Decay: all present modules decay (dimension-specific rates)
+        decay = SHEDDING_DECAY[None, :] * self.module_present
+        self.module_usage -= decay
+
+        np.clip(self.module_usage, 0.0, 1.0, out=self.module_usage)
+
+    def _apply_capacity_shedding(self):
+        """Apply shedding state transitions based on usage scores.
+        Three operations in order:
+          1. Stress reactivation: dormant modules wake up in toxic/viral zones
+          2. Deactivation: low-usage active modules go dormant (reversible)
+          3. Genome loss: very-low-usage dormant modules lost permanently
+        Safety: TOXPROD never sheds; last energy source always protected."""
+        c = self.cfg
+        n = self.pop
+        if n == 0:
+            return
+
+        # Stress reactivation: high toxic or viral pressure reactivates dormant modules
+        local_toxic = self.toxic[self.rows, self.cols]
+        local_viral = self.viral_particles[self.rows, self.cols]
+        stressed = (local_toxic > c.shedding_stress_reactivation) | (local_viral > 0.1)
+        if stressed.any():
+            sidx = np.where(stressed)[0]
+            dormant = self.module_present[sidx] & ~self.module_active[sidx]
+            # Reactivate dormant modules under stress, boost their usage
+            reactivate = dormant & (self.module_usage[sidx] > c.shedding_loss_threshold)
+            self.module_active[sidx] |= reactivate
+            self.module_usage[sidx] += reactivate * 0.3
+            np.clip(self.module_usage[sidx], 0.0, 1.0, out=self.module_usage[sidx])
+
+        # Deactivation: low usage → module goes dormant
+        low_usage = (self.module_usage < c.shedding_deactivate_threshold) & self.module_active
+        # Protect TOXPROD and last energy module
+        low_usage[:, M_TOXPROD] = False
+        for i in np.where(low_usage.any(axis=1))[0]:
+            for m in np.where(low_usage[i])[0]:
+                if m in (M_PHOTO, M_CHEMO, M_CONSUME):
+                    # Don't deactivate last energy source
+                    others = [e for e in (M_PHOTO, M_CHEMO, M_CONSUME)
+                             if e != m and self.module_active[i, e]]
+                    if not others:
+                        low_usage[i, m] = False
+        self.module_active[low_usage] = False
+
+        # Genome loss: very low usage → module lost entirely (irreversible)
+        very_low = (self.module_usage < c.shedding_loss_threshold) & self.module_present
+        very_low[:, M_TOXPROD] = False
+        for i in np.where(very_low.any(axis=1))[0]:
+            for m in np.where(very_low[i])[0]:
+                if m in (M_PHOTO, M_CHEMO, M_CONSUME):
+                    others = [e for e in (M_PHOTO, M_CHEMO, M_CONSUME)
+                             if e != m and self.module_present[i, e]]
+                    if not others:
+                        very_low[i, m] = False
+        self.module_present[very_low] = False
+        self.module_active[very_low] = False
+        self.module_usage[very_low] = 0.0
+
+    # ── Genomic Incompatibility (Phase 4 Step 2) ──
+    # Organisms that absorb too much foreign DNA through horizontal gene transfer
+    # accumulate genomic_stress. This models the real biological cost of chimeric
+    # genomes — regulatory conflicts, protein misfolding, metabolic interference.
+    # The cascade has three phases of increasing severity, with recovery possible
+    # if stress drops below 70% of the threshold. Emergency pruning (shedding
+    # least-used modules) provides dramatic stress relief but permanent capability loss.
+    # Toxic environments amplify genomic stress — chimeras in toxic zones face
+    # compounded pressure from both environmental and genomic sources.
+
+    def _apply_genomic_incompatibility(self, energy_gain):
+        """Check for and apply genomic incompatibility cascade.
+        Modifies energy_gain in-place for phase 1. Returns pruning events count."""
+        c = self.cfg
+        n = self.pop
+        if n == 0:
+            return 0
+
+        # Natural stress decay (integration/accommodation over time)
+        self.genomic_stress -= c.genomic_stress_decay
+        np.clip(self.genomic_stress, 0.0, 10.0, out=self.genomic_stress)
+
+        # Effective stress = genomic_stress + toxic amplification
+        local_toxic = self.toxic[self.rows, self.cols]
+        effective_stress = self.genomic_stress + local_toxic * c.genomic_toxic_multiplier
+
+        # Phase transitions — each escalation makes things worse.
+        # Phase 0 → 1 at ≥ 3.0: metabolic disruption (energy -40%)
+        # Phase 1 → 2 at ≥ 4.5: regulatory breakdown (random module deactivation)
+        # Phase 2 → 3 at ≥ 6.0: identity dissolution (direct energy drain, often lethal)
+        thresh = c.genomic_cascade_threshold
+        entering_p1 = (effective_stress >= thresh) & (self.genomic_cascade_phase == 0)
+        entering_p2 = (effective_stress >= thresh * 1.5) & (self.genomic_cascade_phase == 1)
+        entering_p3 = (effective_stress >= thresh * 2.0) & (self.genomic_cascade_phase == 2)
+
+        # Recovery: stress drops below threshold → step down
+        recovering = (effective_stress < thresh * 0.7) & (self.genomic_cascade_phase > 0)
+        self.genomic_cascade_phase[recovering] = np.maximum(0, self.genomic_cascade_phase[recovering] - 1)
+
+        self.genomic_cascade_phase[entering_p1] = 1
+        self.genomic_cascade_phase[entering_p2] = 2
+        self.genomic_cascade_phase[entering_p3] = 3
+
+        # Phase 1+: Metabolic disruption — energy gain reduced by 40%.
+        # Applied to energy_gain IN PLACE so it affects the caller's copy.
+        in_p1 = self.genomic_cascade_phase >= 1
+        if in_p1.any():
+            energy_gain[in_p1] *= (1.0 - c.genomic_phase1_energy_penalty)
+
+        # Phase 2+: Regulatory breakdown — 30% chance per check of randomly
+        # deactivating one active module. Protects TOXPROD and last energy source.
+        in_p2 = np.where(self.genomic_cascade_phase >= 2)[0]
+        if len(in_p2) > 0:
+            deactivate_mask = self.rng.random(len(in_p2)) < c.genomic_phase2_deactivate_prob
+            for idx in in_p2[deactivate_mask]:
+                active_mods = np.where(self.module_active[idx] & (np.arange(N_MODULES) != M_TOXPROD))[0]
+                # Protect last energy source
+                energy_mods = [m for m in active_mods if m in (M_PHOTO, M_CHEMO, M_CONSUME)]
+                safe_to_deactivate = [m for m in active_mods
+                                     if m not in (M_PHOTO, M_CHEMO, M_CONSUME) or len(energy_mods) > 1]
+                if safe_to_deactivate:
+                    self.module_active[idx, self.rng.choice(safe_to_deactivate)] = False
+
+        # Phase 3: Identity dissolution — direct 2.0 energy drain per step.
+        # At this severity the organism is essentially being torn apart by
+        # conflicting regulatory programs. Lethal within ~50 steps.
+        in_p3 = self.genomic_cascade_phase == 3
+        if in_p3.any():
+            self.energy[in_p3] -= c.genomic_phase3_energy_drain
+
+        # Emergency genomic pruning: at stress ≥ 4.0, the organism jettisons
+        # its least-used modules (synergy with capacity shedding — recently
+        # dormant modules go first). Provides 80% stress relief and resets
+        # cascade phase to 0. Pruned organisms become MORE receptive to new
+        # DNA (+0.5 transfer receptivity) — empty slots invite recolonization.
+        prune_candidates = np.where(self.genomic_stress >= c.genomic_pruning_threshold)[0]
+        n_pruned = 0
+        for idx in prune_candidates:
+            # Lose up to N most recently acquired modules (highest transfer_count correlation)
+            expendable = np.where(self.module_present[idx] & (np.arange(N_MODULES) != M_TOXPROD))[0]
+            # Protect last energy source
+            energy_mods = [m for m in expendable if m in (M_PHOTO, M_CHEMO, M_CONSUME)]
+            if len(energy_mods) <= 1:
+                expendable = [m for m in expendable if m not in energy_mods]
+            else:
+                expendable = list(expendable)
+
+            n_to_lose = min(c.genomic_pruning_module_loss, len(expendable))
+            if n_to_lose > 0:
+                # Lose least-used modules first (synergy with shedding)
+                by_usage = sorted(expendable, key=lambda m: self.module_usage[idx, m])
+                for m in by_usage[:n_to_lose]:
+                    self.module_present[idx, m] = False
+                    self.module_active[idx, m] = False
+                    self.module_usage[idx, m] = 0.0
+
+                # Relief
+                self.genomic_stress[idx] *= (1.0 - c.genomic_pruning_stress_relief)
+                self.genomic_cascade_phase[idx] = 0
+
+                # Pruned organisms become highly receptive to new material
+                sp = self._standalone_params()
+                sp[idx, 0] = min(sp[idx, 0] + c.genomic_pruning_receptivity_boost, 3.0)
+
+                n_pruned += 1
+
+        return n_pruned
+
+    # ── Developmental Dependency (Phase 4 Step 3) ──
+    # Newborn organisms start immature. They must accumulate developmental
+    # progress by being near compatible neighbors within a time window.
+    # This models real developmental biology: organisms need environmental
+    # signals from other species to develop properly (e.g. gut microbiome,
+    # nurse plants, mycorrhizal networks).
+    #
+    # Progress sources (cumulative per step):
+    #   Cross-type neighbor (producer↔consumer): 1.0× rate (full)
+    #   Same-type neighbor (conspecific):         0.6× rate
+    #   Mediator field:                           0.5× rate
+    #   Raw co-location (any neighbor):           0.25× rate
+    #   Isolation (no neighbors):                 0.05× rate (extremely slow)
+    #
+    # Window = 75 steps. If dev_progress < 1.0 when age > 75:
+    #   energy acquisition penalty (up to 50% based on deficit)
+    #   reproduction threshold × 1.5 (harder to reproduce)
+    #   aging speed × 1.5 (shorter lifespan)
+
+    def _update_development(self):
+        """Update developmental progress. Immature organisms near compatible
+        neighbors gain progress. Window expiration → permanent compromise."""
+        c = self.cfg
+        n = self.pop
+        if n == 0:
+            return
+
+        immature = ~self.is_mature
+        if not immature.any():
+            return
+
+        iidx = np.where(immature)[0]
+
+        # Check for compatible neighbors in same cell
+        # Compatibility: producers benefit from nearby consumers, consumers from producers
+        has_prod = self.module_active[:, M_PHOTO] | self.module_active[:, M_CHEMO]
+        has_cons = self.module_active[:, M_CONSUME]
+
+        # Build per-cell producer and consumer density
+        prod_density = np.zeros((c.grid_size, c.grid_size), dtype=np.float64)
+        cons_density = np.zeros((c.grid_size, c.grid_size), dtype=np.float64)
+        pidx_prod = np.where(has_prod)[0]
+        pidx_cons = np.where(has_cons)[0]
+        if len(pidx_prod) > 0:
+            np.add.at(prod_density, (self.rows[pidx_prod], self.cols[pidx_prod]), 1.0)
+        if len(pidx_cons) > 0:
+            np.add.at(cons_density, (self.rows[pidx_cons], self.cols[pidx_cons]), 1.0)
+
+        # Immature producers need consumers nearby, immature consumers need producers
+        is_prod_imm = has_prod[iidx]
+        is_cons_imm = has_cons[iidx]
+
+        local_cons = cons_density[self.rows[iidx], self.cols[iidx]]
+        local_prod = prod_density[self.rows[iidx], self.cols[iidx]]
+
+        # Progress: compatible neighbors present → progress increases
+        # Cross-type: producers near consumers (fast)
+        # Same-type: conspecific support (0.4x rate — species develop from own kind too)
+        local_med = self.mediator_field[self.rows[iidx], self.cols[iidx]]
+        compat_present = np.zeros(len(iidx), dtype=np.float64)
+        # Cross-type (full rate)
+        compat_present += is_prod_imm * np.minimum(local_cons, 3.0) / 3.0
+        compat_present += is_cons_imm * np.minimum(local_prod, 3.0) / 3.0
+        # Same-type conspecific (0.6x — organisms develop from own kind)
+        compat_present += is_prod_imm * np.minimum(local_prod, 3.0) / 3.0 * 0.6
+        compat_present += is_cons_imm * np.minimum(local_cons, 3.0) / 3.0 * 0.6
+        # Mediators help everyone develop
+        compat_present += np.minimum(local_med, 1.0) * 0.5
+
+        # Raw co-location: any neighbor helps
+        local_dens = self.density[self.rows[iidx], self.cols[iidx]].astype(np.float64)
+        compat_present += np.minimum(local_dens - 1, 3.0) * 0.25
+
+        # Solo development extremely slow — isolation is dangerous
+        compat_present = np.maximum(compat_present, 0.05)
+
+        self.dev_progress[iidx] += c.dev_progress_rate * compat_present
+
+        # Maturation check
+        new_mature = iidx[self.dev_progress[iidx] >= 1.0]
+        self.is_mature[new_mature] = True
+        self.dev_progress[new_mature] = 1.0
+
+    def _compute_dev_compromise(self):
+        """Return per-organism energy multiplier [0.5, 1.0] from developmental compromise.
+        Mature organisms: 1.0 (no penalty). Compromised (past window, immature):
+        penalty scales with how far from maturation — fully unmatured = 0.5× energy."""
+        c = self.cfg
+        n = self.pop
+        mult = np.ones(n, dtype=np.float64)
+        if n == 0:
+            return mult
+
+        # Past developmental window and not mature → compromised
+        past_window = (self.age > c.dev_window_length) & ~self.is_mature
+        if past_window.any():
+            deficit = 1.0 - np.minimum(self.dev_progress[past_window], 1.0)
+            mult[past_window] = 1.0 - deficit * c.dev_compromise_energy
+
+        return mult
+
+    # ── Nonlinear Collapse Dynamics (Phase 4 Step 4) ──
+    # Ecosystem integrity is a per-cell score [0,1] that tracks how healthy
+    # each region of the grid is. It requires ACTIVE ecological signals —
+    # background nutrients alone don't prop up integrity.
+    #
+    # Integrity formula:
+    #   + Population density signal (45%): capped at 3 organisms/cell
+    #   + Mediator service (20%): pollination/dispersal coverage
+    #   + Diversity (20%): presence of BOTH producers AND consumers
+    #   + Fungal density (15%): mycelial infrastructure (Phase 4 Step 5)
+    #   - Toxic penalty (30%): toxicity > 0.5 degrades integrity significantly
+    #   - Viral penalty (15%): viral particles > 0.3 degrade integrity
+    #   Smoothed over 7×7 area (uniform_filter) to prevent cell-level noise.
+    #
+    # Collapse/Recovery hysteresis:
+    #   integrity < 0.28 → zone collapses (in populated areas only)
+    #   integrity > 0.42 → zone recovers (higher bar prevents flicker)
+    #   Empty cells are treated as pristine, not collapsed.
+    #
+    # Collapsed zone effects:
+    #   Reproduction penalty: sigmoid up to 80% reduction
+    #   Energy penalty: 0.3/step direct drain
+    #   Shedding acceleration: 2× faster module decay (forced simplification)
+
+    def _update_ecosystem_integrity(self):
+        """Compute per-cell ecosystem integrity from ACTIVE ecosystem signals.
+        Background nutrients/fungi don't prop up integrity — only living activity."""
+        from scipy.ndimage import uniform_filter
+        c = self.cfg
+        N = c.grid_size
+
+        # Active signals — things requiring living organisms to maintain
+        pop_signal = np.minimum(self.density.astype(np.float64) / 3.0, 1.0)
+        med_signal = np.minimum(self.mediator_field / 0.3, 1.0)
+        # Diversity: mix of producers and consumers in area
+        producer_dens = np.zeros((N, N))
+        consumer_dens = np.zeros((N, N))
+        if self.pop > 0:
+            has_prod = self.module_active[:, M_PHOTO] | self.module_active[:, M_CHEMO]
+            has_cons = self.module_active[:, M_CONSUME]
+            pidx = np.where(has_prod)[0]
+            cidx = np.where(has_cons)[0]
+            if len(pidx) > 0:
+                np.add.at(producer_dens, (self.rows[pidx], self.cols[pidx]), 1)
+            if len(cidx) > 0:
+                np.add.at(consumer_dens, (self.rows[cidx], self.cols[cidx]), 1)
+        diversity_signal = np.minimum(producer_dens, 1.0) * np.minimum(consumer_dens + 0.1, 1.0)
+        fungal_signal = np.minimum(self.fungal_density / 2.0, 1.0)
+
+        raw_integrity = (pop_signal * 0.45 + med_signal * 0.2 +
+                        diversity_signal * 0.2 + fungal_signal * 0.15)
+
+        # Negative signals REDUCE integrity (toxic stress, viral load)
+        toxic_penalty = np.minimum(self.toxic / 0.5, 1.0) * 0.3  # toxic > 0.5 → significant penalty
+        viral_penalty = np.minimum(self.viral_particles / 0.3, 1.0) * 0.15
+        raw_integrity -= toxic_penalty
+        raw_integrity -= viral_penalty
+        np.clip(raw_integrity, 0, 1.0, out=raw_integrity)
+
+        # Empty cells = pristine, not collapsed
+        habitated = self.density > 0
+        raw_integrity[~habitated] = np.maximum(raw_integrity[~habitated], c.recovery_threshold + 0.1)
+
+        self.ecosystem_integrity = uniform_filter(raw_integrity, size=7, mode='wrap')
+
+    def _update_collapse_state(self):
+        """Apply collapse/recovery hysteresis. Two key design choices:
+        1. Only populated zones can collapse (empty wilderness is pristine, not failed).
+        2. Recovery requires integrity > 0.42, not just > 0.28 (hysteresis gap of 0.14
+           prevents rapid oscillation between collapsed and healthy states)."""
+        c = self.cfg
+        # Only collapse zones that have had organisms (density > 0 or recently had)
+        habitated = self.density > 0
+        # Expand habitated zone slightly (organisms affect neighbors)
+        from scipy.ndimage import maximum_filter
+        habitated = maximum_filter(habitated.astype(np.float64), size=5) > 0
+
+        # New collapses (only in habitated zones)
+        new_collapse = (self.ecosystem_integrity < c.collapse_threshold) & habitated & ~self.zone_collapsed
+        self.zone_collapsed |= new_collapse
+        # Recovery (must exceed HIGHER threshold — hysteresis)
+        recovering = (self.ecosystem_integrity > c.recovery_threshold) & self.zone_collapsed
+        self.zone_collapsed &= ~recovering
+
+    def _collapse_reproduction_modifier(self):
+        """Sigmoid reproduction penalty for organisms in collapsed zones.
+        The sigmoid makes the penalty gradual near the threshold but steep
+        once integrity drops significantly below it. At integrity = 0,
+        reproduction success is reduced by up to 80%."""
+        c = self.cfg
+        if self.pop == 0:
+            return np.ones(0)
+        in_collapsed = self.zone_collapsed[self.rows, self.cols]
+        modifier = np.ones(self.pop, dtype=np.float64)
+        if in_collapsed.any():
+            # Steep sigmoid: drops from 1.0 to (1-penalty) as integrity decreases
+            local_int = self.ecosystem_integrity[self.rows, self.cols]
+            # Below threshold: penalty scales with how far below
+            deficit = np.maximum(0, c.collapse_threshold - local_int[in_collapsed]) / c.collapse_threshold
+            sigmoid_penalty = 1.0 / (1.0 + np.exp(-c.collapse_sigmoid_steepness * (deficit - 0.3)))
+            modifier[in_collapsed] = 1.0 - c.collapse_repro_penalty * sigmoid_penalty
+        return modifier
+
+    def _compute_compounding_stress(self):
+        """Multiplicative stress from overlapping failure modes.
+        Counts five failure sources per organism:
+          f1: Toxic stress (local toxic > 0.3)
+          f2: Genomic cascade (any phase > 0)
+          f3: Behavioral hijack (intensity > 0.1)
+          f4: Developmental compromise (past window, not mature)
+          f5: Ecosystem collapse (organism in collapsed zone)
+        Each active failure multiplies energy costs by 1.2×.
+        Two failures = 1.44×, three = 1.728×, all five = 2.488× costs.
+        This makes compound failures much more dangerous than any single one."""
+        c = self.cfg
+        n = self.pop
+        if n == 0:
+            return np.ones(0)
+
+        stress_mult = np.ones(n, dtype=np.float64)
+        # Count active failure modes per organism
+        local_toxic = self.toxic[self.rows, self.cols]
+        f1 = local_toxic > 0.3                              # toxic stress
+        f2 = self.genomic_cascade_phase > 0                  # genomic cascade
+        f3 = self.hijack_intensity > 0.1                     # behavioral hijack
+        f4 = (self.age > c.dev_window_length) & ~self.is_mature  # developmental compromise
+        f5 = self.zone_collapsed[self.rows, self.cols]       # ecosystem collapse
+
+        failure_count = (f1.astype(np.float64) + f2.astype(np.float64) +
+                        f3.astype(np.float64) + f4.astype(np.float64) +
+                        f5.astype(np.float64))
+
+        # Each overlapping failure multiplies stress
+        stress_mult = np.power(c.compounding_base, failure_count)
+        return stress_mult
+
+    # ── Fungal Networks (Phase 4 Step 5 — THIS STEP) ──
+    # Grid-level infrastructure that emerges from decomposition.
+    # Three methods: growth/spread/decay, nutrient transport, toxic conduit.
+    # The fungal network is the bridge between death and recovery —
+    # it feeds on the dead and channels resources to the living.
+
+    def _update_fungal_network(self):
+        """Grow, spread, and decay fungal network. Transport nutrients and genome fragments."""
+        c = self.cfg
+
+        # Growth: fungi feed on decomposition
+        growth_mask = self.decomposition > c.fungal_decomp_threshold
+        growth = np.zeros_like(self.fungal_density)
+        growth[growth_mask] = (c.fungal_growth_rate *
+                               np.minimum(self.decomposition[growth_mask] / 5.0, 1.0))
+
+        # Surge growth during mass death events (high decomposition)
+        surge_mask = self.decomposition > c.fungal_surge_threshold
+        growth[surge_mask] *= c.fungal_surge_mult
+
+        # Growth also consumes decomposition (fungi eat dead material)
+        consumed = growth * 0.5
+        self.decomposition -= consumed
+        np.clip(self.decomposition, 0, 30.0, out=self.decomposition)
+
+        self.fungal_density += growth
+
+        # Spread: mycelial diffusion to neighbors
+        diffused = gaussian_filter(self.fungal_density, sigma=1.5, mode='wrap')
+        self.fungal_density = (1.0 - c.fungal_diffusion_rate) * self.fungal_density + \
+                              c.fungal_diffusion_rate * diffused
+
+        # Decay: maintenance cost
+        self.fungal_density -= c.fungal_decay_rate
+        np.clip(self.fungal_density, 0, 5.0, out=self.fungal_density)
+
+    def _fungal_nutrient_transport(self):
+        """Redistribute nutrients along fungal network.
+        Uses Gaussian-blurred average as target: nutrients flow from surplus
+        to deficit zones, scaled by local fungal density. This means fungal-rich
+        areas act as nutrient highways — decomposition in one zone can feed
+        organisms in a distant zone connected by mycelium."""
+        c = self.cfg
+        if self.fungal_density.max() < 0.01:
+            return
+
+        # Nutrient transport: fungi move nutrients toward low-nutrient zones
+        avg_nutrients = gaussian_filter(self.nutrients, sigma=3.0, mode='wrap')
+        gradient = avg_nutrients - self.nutrients  # positive = local deficit
+        transport = c.fungal_nutrient_transport * self.fungal_density * gradient
+        self.nutrients += transport
+        np.clip(self.nutrients, 0, 3.0, out=self.nutrients)
+
+    def _fungal_toxic_conduit(self):
+        """Fungal networks accelerate toxic diffusion along their paths.
+        This is the double-edged sword: fungi transport nutrients (good) but
+        also propagate toxins (dangerous). A toxic event in one zone can
+        spread faster through fungal conduits to connected zones, potentially
+        triggering cascading collapse across the mycelial network."""
+        c = self.cfg
+        if self.fungal_density.max() < 0.01:
+            return
+
+        # Extra toxic spread along fungal conduits
+        fungal_boost = c.fungal_toxic_conduit * self.fungal_density
+        toxic_gradient = gaussian_filter(self.toxic, sigma=2.0, mode='wrap') - self.toxic
+        self.toxic += fungal_boost * toxic_gradient
+        np.clip(self.toxic, 0, None, out=self.toxic)
+
+    # ── Main Loop ──
+    # 22 operations per timestep, ordered for correct causal flow.
+    # Phase 4 additions (marked ★) are interleaved at specific positions:
+    #   ★ Genomic cascade: after energy gain, before costs (modifies energy_gain in place)
+    #   ★ Developmental dependency: after cascade, before costs (multiplies energy_gain)
+    #   ★ Compounding stress: after base costs, multiplies total cost
+    #   ★ Dev compromise aging: after movement (accelerates age increment)
+    #   ★ Fungal network: after nutrient cycling (feeds on decomp, transports nutrients)
+    #   ★ Ecosystem integrity + collapse: every 5 steps (smoothed dynamics)
+    #   ★ Capacity shedding: every 5 steps (accelerated in collapsed zones)
+
+    def update(self):
+        if self.pop == 0:
+            self._update_environment()
+            self.timestep += 1
+            self._record_stats(0)
+            return
+
+        self._update_density()
+        readings = self._sense_local()
+
+        # Compute behavioral hijack intensity for this step
+        self._compute_hijack_intensity()
+
+        effective_max = self._effective_energy_max()
+        energy_gain = self._acquire_energy(readings)
+
+        # Behavioral hijacking: heavy hijack suppresses energy acquisition
+        if self.hijack_intensity.any():
+            heavy = self.hijack_intensity > 0.3
+            if heavy.any():
+                suppress = self.hijack_intensity[heavy] * self.cfg.hijack_energy_suppress
+                energy_gain[heavy] *= (1.0 - suppress)
+
+        # ★ Phase 4 Step 2: Genomic incompatibility cascade.
+        # Applied to energy_gain before it's added to organism energy.
+        # Phase 1+ organisms get 40% less energy from all sources.
+        if self.timestep % self.cfg.genomic_check_interval == 0:
+            self._apply_genomic_incompatibility(energy_gain)
+
+        # ★ Phase 4 Step 3: Developmental dependency.
+        # Update dev progress for immature organisms, then apply energy
+        # penalty to compromised organisms (past window, not mature).
+        self._update_development()
+        energy_gain *= self._compute_dev_compromise()
+
+        self.energy = np.minimum(self.energy + energy_gain, effective_max)
+        self._apply_toxic_damage(readings)
+        self._apply_detox()
+        base_costs = self._compute_total_costs()
+
+        # ★ Phase 4: Compounding stress — overlapping failure modes multiply costs.
+        # Each of 5 failure sources adds 1.2× multiplier to base costs.
+        compound = self._compute_compounding_stress()
+        self.energy -= base_costs * compound
+
+        # (Sessile crowding penalty removed — sessile producers compete through canopy/roots, not escape)
+
+        self._execute_movement(self._decide_movement(readings))
+        # Developmental compromise accelerates aging
+        age_mult = np.ones(self.pop, dtype=np.float64)
+        past_window = (self.age > self.cfg.dev_window_length) & ~self.is_mature
+        if past_window.any():
+            deficit = 1.0 - np.minimum(self.dev_progress[past_window], 1.0)
+            age_mult[past_window] = 1.0 + deficit * (self.cfg.dev_compromise_aging - 1.0)
+        self.age += age_mult.astype(np.int32)
+
+        # Social field update and interactions
+        if self.timestep % self.cfg.social_update_interval == 0:
+            self._update_social_field()
+        self._apply_social_interactions()
+
+        # Mediator field update (pollination service availability)
+        if self.timestep % self.cfg.mediate_update_interval == 0:
+            self._update_mediator_field()
+
+        # Nutrient cycling (emergent from DETOX/CONSUME/FORAGE interactions)
+        self._apply_nutrient_cycling()
+
+        # ★ Phase 4 Step 5 (THIS STEP): Fungal network update.
+        # Placed after nutrient cycling: fungi feed on decomposition first,
+        # then redistribute nutrients, then propagate toxins through conduits.
+        if self.timestep % self.cfg.fungal_update_interval == 0:
+            self._update_fungal_network()
+            self._fungal_nutrient_transport()
+            self._fungal_toxic_conduit()
+
+        # ★ Phase 4 Step 4: Ecosystem integrity assessment + collapse state.
+        # Runs every 5 steps for smoothed dynamics. Also applies energy
+        # penalty to organisms in collapsed zones.
+        if self.timestep % 5 == 0:
+            self._update_ecosystem_integrity()
+            self._update_collapse_state()
+
+            # Collapse zone energy penalty
+            if self.pop > 0:
+                in_collapsed = self.zone_collapsed[self.rows, self.cols]
+                if in_collapsed.any():
+                    self.energy[in_collapsed] -= self.cfg.collapse_energy_penalty
+
+        # ★ Phase 4 Step 1: Capacity shedding.
+        # Runs every 5 steps. In collapsed zones, decay rate doubles (organisms
+        # are forced to simplify under ecosystem pressure, shedding unused modules).
+        if self.timestep % self.cfg.shedding_check_interval == 0:
+            self._update_module_usage(readings)
+            # Accelerate shedding in collapsed zones
+            if self.pop > 0:
+                in_collapsed = self.zone_collapsed[self.rows, self.cols]
+                if in_collapsed.any():
+                    cidx = np.where(in_collapsed)[0]
+                    extra_decay = SHEDDING_DECAY[None, :] * (self.cfg.collapse_shedding_mult - 1.0)
+                    self.module_usage[cidx] -= extra_decay * self.module_present[cidx]
+                    np.clip(self.module_usage[cidx], 0.0, 1.0, out=self.module_usage[cidx])
+            self._apply_capacity_shedding()
+
+        kills = 0
+        if self.timestep % self.cfg.predation_check_interval == 0:
+            kills = self._predation()
+        if self.timestep % self.cfg.transfer_check_interval == 0:
+            self._horizontal_transfer()
+        if self.timestep % self.cfg.viral_check_interval == 0:
+            self._viral_dynamics()
+
+        # Endosymbiosis: rare merger events
+        mergers = 0
+        if self.timestep % self.cfg.endo_check_interval == 0:
+            mergers = self._attempt_endosymbiosis()
+
+        self._reproduce()
+        self._kill_and_decompose()
+        self._update_environment()
+        self._record_stats(kills)
+        self.timestep += 1
+
+    # ── Stats ──
+
+    def _classify_roles(self):
+        n = self.pop
+        if n == 0:
+            return {"producer": 0, "herbivore": 0, "carnivore": 0, "detritivore": 0, "omnivore": 0}
+
+        has_prod = self.module_present[:, M_PHOTO] | self.module_present[:, M_CHEMO]
+        has_cons = self.module_present[:, M_CONSUME]
+        producer = has_prod & ~has_cons
+        omnivore = has_prod & has_cons
+        obligate = has_cons & ~has_prod
+
+        herbivore = carnivore = detritivore = np.zeros(n, dtype=bool)
+        if obligate.any():
+            uw = self._module_weights(M_CONSUME)
+            dp = 1.0 / (1.0 + np.exp(-uw[:, 2]))   # decomp_pref
+            ps = 1.0 / (1.0 + np.exp(-uw[:, 0]))   # prey_selectivity: 0=herbivore, 1=carnivore
+            detritivore = obligate & (dp >= 0.5)
+            hunter = obligate & (dp < 0.5)
+            herbivore = hunter & (ps < 0.5)
+            carnivore = hunter & (ps >= 0.5)
+
+        return {
+            "producer": int(producer.sum()),
+            "herbivore": int(herbivore.sum()),
+            "carnivore": int(carnivore.sum()),
+            "detritivore": int(detritivore.sum()),
+            "omnivore": int(omnivore.sum()),
+        }
+
+    def _record_stats(self, kills=0):
+        p = self.pop
+        if p > 0:
+            roles = self._classify_roles()
+            mod_counts = {MODULE_NAMES[m]: int(self.module_present[:, m].sum())
+                         for m in range(N_MODULES)}
+            self.stats_history.append({
+                "t": self.timestep, "pop": p,
+                "avg_energy": round(float(self.energy.mean()), 1),
+                "max_gen": int(self.generation.max()),
+                "toxic_mean": round(float(self.toxic.mean()), 3),
+                "decomp_mean": round(float(self.decomposition.mean()), 2),
+                "avg_modules": round(float(self.module_present.sum(axis=1).mean()), 2),
+                "module_counts": mod_counts,
+                "roles": roles,
+                "kills": kills,
+                "total_kills": self.total_predation_kills,
+                "avg_immune_exp": round(float(self.immune_experience.mean()), 3),
+                "avg_relationship": round(float(self.relationship_score.mean()), 3),
+                "max_relationship": round(float(self.relationship_score.max()), 3),
+                "mediator_field_mean": round(float(self.mediator_field.mean()), 4),
+                "nutrient_mean": round(float(self.nutrients.mean()), 3),
+                "lyso_fraction": round(float((self.lysogenic_strength > self.cfg.repro_manip_threshold).sum() / max(p, 1)), 3),
+                "manipulated_births": self.total_manipulated_births,
+                "hijack_fraction": round(float((self.hijack_intensity > 0.1).sum() / max(p, 1)), 3),
+                "hijacked_steps": self.total_hijacked_steps,
+                "total_mergers": self.total_mergers,
+                "max_merger_count": int(self.merger_count.max()) if p > 0 else 0,
+                "composite_organisms": int((self.merger_count > 0).sum()),
+                # ── Phase 4 stats ──
+                "dormant_modules": int((self.module_present & ~self.module_active).sum()),  # present but inactive
+                "avg_usage": round(float(self.module_usage[self.module_present].mean()), 3) if self.module_present.any() else 0,  # avg module health
+                "avg_genomic_stress": round(float(self.genomic_stress.mean()), 3),  # HGT overload level
+                "cascade_organisms": int((self.genomic_cascade_phase > 0).sum()),  # organisms in cascade failure
+                "max_cascade_phase": int(self.genomic_cascade_phase.max()),
+                "mature_fraction": round(float(self.is_mature.sum() / max(p, 1)), 3),  # fraction that matured properly
+                "compromised_count": int(((self.age > self.cfg.dev_window_length) & ~self.is_mature).sum()),  # permanently compromised
+                "collapsed_zones": int(self.zone_collapsed.sum()),  # grid cells in ecosystem collapse
+                "avg_integrity": round(float(self.ecosystem_integrity.mean()), 3),  # ecosystem health score [0,1]
+                "fungal_mean": round(float(self.fungal_density.mean()), 4),  # average mycelial density
+                "fungal_max": round(float(self.fungal_density.max()), 3),  # peak fungal density anywhere
+            })
+        else:
+            self.stats_history.append({
+                "t": self.timestep, "pop": 0, "avg_energy": 0, "max_gen": 0,
+                "toxic_mean": round(float(self.toxic.mean()), 3),
+                "decomp_mean": round(float(self.decomposition.mean()), 2),
+                "avg_modules": 0, "module_counts": {MODULE_NAMES[m]: 0 for m in range(N_MODULES)},
+                "roles": {"producer": 0, "herbivore": 0, "carnivore": 0, "detritivore": 0, "omnivore": 0},
+                "kills": 0, "total_kills": self.total_predation_kills,
+                "avg_immune_exp": 0, "avg_relationship": 0, "max_relationship": 0,
+                "mediator_field_mean": 0, "nutrient_mean": round(float(self.nutrients.mean()), 3),
+                "lyso_fraction": 0, "manipulated_births": self.total_manipulated_births,
+                "hijack_fraction": 0, "hijacked_steps": self.total_hijacked_steps,
+                "total_mergers": self.total_mergers, "max_merger_count": 0, "composite_organisms": 0,
+                "dormant_modules": 0, "avg_usage": 0,
+                "avg_genomic_stress": 0, "cascade_organisms": 0, "max_cascade_phase": 0,
+                "mature_fraction": 0, "compromised_count": 0,
+                "collapsed_zones": int(self.zone_collapsed.sum()),
+                "avg_integrity": round(float(self.ecosystem_integrity.mean()), 3),
+                "fungal_mean": round(float(self.fungal_density.mean()), 4),
+                "fungal_max": round(float(self.fungal_density.max()), 3),
+            })
+
+    def save_snapshot(self, output_dir):
+        os.makedirs(output_dir, exist_ok=True)
+        p = self.pop
+        idx = self.rng.choice(p, min(p, 500), replace=False) if p > 500 else np.arange(p)
+        orgs = [{
+            "id": int(self.ids[i]), "row": int(self.rows[i]), "col": int(self.cols[i]),
+            "energy": round(float(self.energy[i]), 2), "age": int(self.age[i]),
+            "generation": int(self.generation[i]),
+            "modules": [MODULE_NAMES[m] for m in range(N_MODULES) if self.module_present[i, m]],
+        } for i in idx]
+        s = self.stats_history[-1] if self.stats_history else {}
+        with open(os.path.join(output_dir, f"snapshot_{self.timestep:06d}.json"), 'w') as f:
+            json.dump({"timestep": self.timestep, "population": p, "organisms": orgs, "stats": s}, f)
+
+
+# ─────────────────────────────────────────────────────
+# Run
+# ─────────────────────────────────────────────────────
+
+def run_simulation(cfg=None):
+    cfg = cfg or Config()
+    world = World(cfg)
+
+    print(f"The Shimmering Field — Phase 4 Step 5: Fungal Networks")
+    print(f"Grid: {cfg.grid_size}×{cfg.grid_size}  |  Pop: {cfg.initial_population}  |  Weights: {TOTAL_WEIGHT_PARAMS}")
+    print(f"Module costs — PH:{MODULE_MAINTENANCE[M_PHOTO]+MODULE_EXPRESSION[M_PHOTO]:.2f}  "
+          f"CH:{MODULE_MAINTENANCE[M_CHEMO]+MODULE_EXPRESSION[M_CHEMO]:.2f}  "
+          f"CO:{MODULE_MAINTENANCE[M_CONSUME]+MODULE_EXPRESSION[M_CONSUME]:.2f}  "
+          f"MV:{MODULE_MAINTENANCE[M_MOVE]+MODULE_EXPRESSION[M_MOVE]:.2f}  "
+          f"FO:{MODULE_MAINTENANCE[M_FORAGE]+MODULE_EXPRESSION[M_FORAGE]:.2f}  "
+          f"DE:{MODULE_MAINTENANCE[M_DEFENSE]+MODULE_EXPRESSION[M_DEFENSE]:.2f}  "
+          f"DT:{MODULE_MAINTENANCE[M_DETOX]+MODULE_EXPRESSION[M_DETOX]:.2f}  "
+          f"VR:{MODULE_MAINTENANCE[M_VRESIST]+MODULE_EXPRESSION[M_VRESIST]:.2f}  "
+          f"SO:{MODULE_MAINTENANCE[M_SOCIAL]+MODULE_EXPRESSION[M_SOCIAL]:.2f}  "
+          f"ME:{MODULE_MAINTENANCE[M_MEDIATE]+MODULE_EXPRESSION[M_MEDIATE]:.2f}")
+    print(f"Repro manipulation: threshold={cfg.repro_manip_threshold}  "
+          f"trait_bias={cfg.repro_manip_trait_bias}  saturation={cfg.repro_manip_saturation}")
+    print(f"{'─' * 160}")
+
+    start = time.time()
+    for t in range(cfg.total_timesteps):
+        world.update()
+
+        if world.timestep % cfg.snapshot_interval == 0:
+            world.save_snapshot(cfg.output_dir)
+            s = world.stats_history[-1]
+            el = time.time() - start
+            r = s["roles"]
+            mc = s["module_counts"]
+            print(
+                f"  t={s['t']:5d}  |  pop={s['pop']:5d}  |  e={s['avg_energy']:5.1f}  |  "
+                f"gen={s['max_gen']:4d}  |  tox={s['toxic_mean']:.3f} ntr={s['nutrient_mean']:.3f}  |  "
+                f"prod={r['producer']:4d} herb={r['herbivore']:3d} carn={r['carnivore']:3d} detr={r['detritivore']:3d} omni={r['omnivore']:3d}  |  "
+                f"FO={mc['FORAGE']:4d} DE={mc['DEFENSE']:4d} DT={mc['DETOX']:4d} VR={mc['VRESIST']:4d} SO={mc['SOCIAL']:4d} ME={mc['MEDIATE']:3d}  |  "
+                f"rel={s['avg_relationship']:.2f} med={s['mediator_field_mean']:.3f}  |  "
+                f"lyso={s['lyso_fraction']:.2f} manip={s['manipulated_births']:5d}  |  "
+                f"hjk={s['hijack_fraction']:.2f}  |  "
+                f"mrg={s['total_mergers']:3d} comp={s['composite_organisms']:3d}  |  "
+                f"drmt={s['dormant_modules']:3d} usg={s['avg_usage']:.2f}  |  "
+                f"gstr={s['avg_genomic_stress']:.2f} casc={s['cascade_organisms']:3d}  |  "
+                f"mat={s['mature_fraction']:.2f} comp={s['compromised_count']:3d}  |  "
+                f"clps={s['collapsed_zones']:5d} int={s['avg_integrity']:.2f} fng={s['fungal_mean']:.3f}  |  "
+                f"kill={s['kills']:3d}  |  mod={s['avg_modules']:.2f}  |  {el:.1f}s"
+            )
+
+        if world.pop == 0:
+            print(f"\n  *** EXTINCTION at t={world.timestep} ***")
+            break
+
+    el = time.time() - start
+    print(f"{'─' * 160}")
+    print(f"Done in {el:.1f}s  |  Pop: {world.pop}  |  Total predation kills: {world.total_predation_kills}")
+
+    if world.pop > 0:
+        r = world.stats_history[-1]["roles"]
+        mc = world.stats_history[-1]["module_counts"]
+        s = world.stats_history[-1]
+        print(f"Roles — Producers: {r['producer']}  Herbivores: {r['herbivore']}  "
+              f"Carnivores: {r['carnivore']}  Detritivores: {r['detritivore']}  "
+              f"Omnivores: {r['omnivore']}")
+        print(f"Modules — PH:{mc['PHOTO']} CH:{mc['CHEMO']} CO:{mc['CONSUME']} "
+              f"MV:{mc['MOVE']} FO:{mc['FORAGE']} DE:{mc['DEFENSE']} DT:{mc['DETOX']} "
+              f"VR:{mc['VRESIST']} SO:{mc['SOCIAL']} ME:{mc['MEDIATE']} TP:{mc['TOXPROD']}")
+        print(f"Social — avg_relationship: {s['avg_relationship']:.3f}  "
+              f"max: {s['max_relationship']:.3f}  "
+              f"avg_immune: {s['avg_immune_exp']:.3f}  "
+              f"mediator: {s['mediator_field_mean']:.4f}  "
+              f"nutrients: {s['nutrient_mean']:.3f}")
+        print(f"Manipulation — lyso_fraction: {s['lyso_fraction']:.3f}  "
+              f"total_manipulated_births: {s['manipulated_births']}  "
+              f"hijack_fraction: {s['hijack_fraction']:.3f}  "
+              f"total_hijacked_steps: {s['hijacked_steps']}")
+        print(f"Endosymbiosis — total_mergers: {s['total_mergers']}  "
+              f"composite_organisms: {s['composite_organisms']}  "
+              f"max_merger_count: {s['max_merger_count']}")
+        print(f"Shedding — dormant_modules: {s['dormant_modules']}  "
+              f"avg_usage: {s['avg_usage']:.3f}")
+        print(f"Genomic — avg_stress: {s['avg_genomic_stress']:.3f}  "
+              f"cascade_organisms: {s['cascade_organisms']}  "
+              f"max_phase: {s['max_cascade_phase']}")
+        print(f"Development — mature: {s['mature_fraction']:.3f}  "
+              f"compromised: {s['compromised_count']}")
+        print(f"Collapse — collapsed_zones: {s['collapsed_zones']}  "
+              f"avg_integrity: {s['avg_integrity']:.3f}")
+        print(f"Fungal — mean_density: {s['fungal_mean']:.4f}  "
+              f"max_density: {s['fungal_max']:.3f}")
+
+    os.makedirs(cfg.output_dir, exist_ok=True)
+    with open(os.path.join(cfg.output_dir, "run_summary.json"), 'w') as f:
+        json.dump({"config": {k: v for k, v in vars(cfg).items() if not k.startswith('_')},
+                   "stats_history": world.stats_history}, f, indent=2)
+    return world
+
+
+if __name__ == "__main__":
+    run_simulation()

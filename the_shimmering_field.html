@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Shimmering Field</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; overflow: hidden; font-family: 'EB Garamond', serif; }
+  canvas { display: block; }
+  #ui {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 10;
+  }
+  #title {
+    position: fixed; top: 28px; left: 36px;
+    color: rgba(200, 210, 190, 0.7);
+    font-size: 13px; letter-spacing: 0.35em; text-transform: uppercase;
+    mix-blend-mode: screen;
+  }
+  #title span { font-size: 10px; opacity: 0.5; display: block; margin-top: 4px; letter-spacing: 0.2em; }
+  #stats {
+    position: fixed; bottom: 28px; left: 36px;
+    color: rgba(160, 175, 150, 0.5);
+    font-size: 11px; letter-spacing: 0.15em; line-height: 1.8;
+  }
+  #tooltip {
+    position: fixed; display: none;
+    background: rgba(5, 8, 4, 0.85);
+    border: 1px solid rgba(120, 180, 100, 0.2);
+    color: rgba(200, 220, 180, 0.8);
+    padding: 12px 16px; font-size: 12px;
+    line-height: 1.6; letter-spacing: 0.05em;
+    pointer-events: none; max-width: 260px;
+    backdrop-filter: blur(8px);
+  }
+  #controls {
+    position: fixed; bottom: 28px; right: 36px;
+    color: rgba(160, 175, 150, 0.4);
+    font-size: 10px; letter-spacing: 0.15em; text-align: right; line-height: 2;
+    pointer-events: all;
+  }
+  #controls button {
+    background: rgba(120, 180, 100, 0.08);
+    border: 1px solid rgba(120, 180, 100, 0.15);
+    color: rgba(200, 220, 180, 0.6);
+    padding: 4px 12px; margin: 2px;
+    font-family: 'EB Garamond', serif; font-size: 11px;
+    letter-spacing: 0.1em; cursor: pointer;
+    transition: all 0.3s;
+  }
+  #controls button:hover { background: rgba(120, 180, 100, 0.15); color: rgba(200, 220, 180, 0.9); }
+  #controls button.active { background: rgba(120, 180, 100, 0.2); border-color: rgba(120, 180, 100, 0.4); }
+  .fade-in { animation: fadeIn 2s ease-out; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+</style>
+</head>
+<body>
+<div id="ui" class="fade-in">
+  <div id="title">The Shimmering Field<span>t = 2000 · 538 organisms · 34 mergers</span></div>
+  <div id="stats"></div>
+  <div id="tooltip"></div>
+  <div id="controls">
+    <button id="btnTerrain" class="active" onclick="setView('terrain')">TERRAIN</button>
+    <button id="btnField" onclick="setView('field')">FIELD</button>
+    <button id="btnOrganism" onclick="setView('organism')">ORGANISMS</button>
+    <br>
+    <button id="btnRotate" class="active" onclick="toggleRotate()">AUTO-ROTATE</button>
+  </div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ═══════════════════════════════════════════════════════════
+// DATA
+// ═══════════════════════════════════════════════════════════
+const GS = 32;
+const MODULE_NAMES = ['PHOTO','CHEMO','CONSUME','MOVE','FORAGE','DEFENSE','DETOX','TOXPROD','VRESIST','SOCIAL','MEDIATE'];
+
+// Organism format: [r, c, energy, age, mods, active_mods, viral_load, hijack, merger_count, genomic_stress, cascade_phase, mature, relationship, lysogenic]
+const ORGS = [[.414,.047,84,11,[2,3,7,10],[2,3,7,10],0,0,0,.9,0,0,.3,.63],[.406,.047,40,3,[2,7],[2,7],0,0,0,.6,0,0,.2,.19],[.109,0,53,46,[0,7],[0,7],0,0,0,.3,0,0,.5,.65],[.406,.047,41,2,[2,3,7,10],[2,3,7,10],0,0,0,.7,0,0,.1,.24],[.586,.406,76,158,[0,3,7],[0,3,7],0,0,0,0,0,1,.1,0],[.703,.391,58,95,[0,3,7],[0,3,7],0,0,0,0,0,0,.1,0],[.133,.094,66,70,[0,3,7],[0,3,7],0,0,0,1.1,0,0,.1,0],[.023,.828,48,5,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.469,.398,52,105,[0,3,7],[0,3,7],0,0,0,0,0,0,.1,0],[.391,.273,68,32,[0,3,7],[0,3,7],0,0,1,0,0,0,0,.03],[.43,.633,43,38,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.07,.859,49,6,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.367,.055,149,43,[2,3,7,10],[2,3,7,10],.8,0,0,3.8,1,1,1.1,.84],[.469,.234,56,19,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.016,.852,46,40,[0,7],[0,7],0,0,0,0,0,0,.2,0],[.523,.258,53,78,[0,3,7],[0,3,7],0,0,0,0,0,0,.1,0],[.625,.281,47,19,[0,3,7],[0,3,7],0,0,1,0,0,0,0,.03],[.5,.203,65,38,[0,3,7],[0,3,7],0,0,0,.1,0,0,0,0],[.68,.938,71,12,[2,3,7,8,10],[2,3,7,8,10],0,0,0,1.6,0,0,.2,.08],[.711,.047,40,122,[0,3,7],[0,3,7],0,0,1,0,0,1,.1,.08],[.453,.047,50,30,[0,3,7],[0,3,7],0,0,1,.8,0,0,0,.06],[.375,.648,74,28,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.445,.062,61,165,[0,3,7],[0,3,7],.4,0,0,1.9,0,1,1,.3],[.062,.648,78,15,[2,3,7,8,10],[2,3,7,8,10],0,0,0,.6,0,0,.1,0],[.102,.477,112,4,[2,3,7,8,10],[2,3,7,8,10],0,0,0,.1,0,0,0,0],[.68,.008,58,140,[0,3,7],[0,3,7],0,0,1,.1,0,1,.1,.05],[.469,.266,143,1,[2,3,7],[2,3,7],0,0,0,.3,0,0,0,0],[.68,.031,40,20,[0,3,7],[0,3,7],0,0,1,0,0,0,0,.06],[.031,.094,77,40,[0,3,7],[0,3,7],0,0,0,.6,0,0,0,.19],[.625,.047,59,163,[0,3,7],[0,3,7],0,0,0,0,0,1,.2,0],[.68,.938,43,4,[2,3,7,10],[2,3,7,10],0,0,0,.9,0,0,.1,.18],[.047,.289,3,4,[2,3,7,10],[2,3,7,10],0,0,0,.5,0,0,0,.38],[.188,.242,24,128,[2,3,7,10],[2,3,7,10],0,0,0,3.9,1,1,.1,0],[.688,.391,58,35,[0,3,7],[0,3,7],0,0,0,0,0,0,.1,0],[.141,.875,44,57,[0,3,7],[0,3,7],0,0,0,.1,0,0,0,0],[.047,.75,5,84,[2,3,7,8,10],[2,3,7,8,10],0,0,0,0,0,1,.1,0],[.523,.562,73,24,[2,3,7,10],[2,3,7,10],0,0,0,0,0,0,0,0],[.125,.117,56,15,[0,3,7],[0,3,7],0,0,0,.7,0,0,0,0],[.406,.047,86,23,[2,3,7,10],[2,3,7,10],.2,0,0,1.1,0,1,.5,.39],[.219,.023,43,3,[0,3,7],[0,3,7],0,0,0,.3,0,0,0,.06],[.406,.734,43,98,[0,3,7],[0,3,7],0,0,0,0,0,0,.1,0],[.25,.461,128,2,[2,3,7,10],[2,3,7,10],0,0,0,.7,0,0,0,0],[.703,.086,64,48,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.047,.945,54,9,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.438,.477,44,3,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.594,.219,62,175,[0,3,7],[0,3,7],0,.9,0,.1,0,1,.1,0],[.227,.633,69,30,[0,3,7,10],[0,3,7,10],0,0,0,0,0,0,0,.05],[.469,.336,59,18,[0,3,7],[0,3,7],0,0,0,.1,0,0,0,0],[.32,.109,44,64,[0,3,7],[0,3,7],0,0,0,.9,0,0,.1,0],[.016,.055,73,168,[0,3,7],[0,3,7],0,0,1,1.1,0,1,.2,.36],[.414,.531,43,1,[2,3,7,10],[2,3,7,10],0,0,0,.1,0,0,0,0],[.008,.852,66,67,[0,7],[0,7],0,0,0,0,0,1,2.2,0],[.508,.461,56,80,[0,3,7],[0,3,7],0,0,0,0,0,0,.2,0],[.438,.023,150,18,[2,3,7,10],[2,3,7,10],.5,.62,0,.2,0,0,0,.04],[.406,.047,41,4,[2,3,7],[2,3,7],0,0,0,.2,0,0,.1,.24],[.398,.281,58,22,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.367,.383,53,19,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.102,.727,35,7,[2,3,7,10],[2,3,7,10],0,0,0,1.2,0,0,0,.19],[.445,.672,62,25,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.141,.016,61,64,[0,7],[0,7],0,0,1,.8,0,0,.4,.29],[.406,.047,137,12,[2,3,7],[2,3,7],.4,0,0,.5,0,0,.3,.24],[.172,.539,49,40,[0,3,7],[0,3,7],0,0,0,0,0,0,.1,0],[.664,.391,69,45,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.391,.039,56,19,[2,3,7,10],[2,3,7,10],.2,0,0,1.1,0,1,.5,.12],[.375,.109,59,101,[0,3,7],[0,3,7],0,0,1,1,0,1,.2,.05],[.406,.633,73,146,[0,3,7],[0,3,7],0,0,0,0,0,1,.1,0],[.5,.633,42,185,[0,3,7],[0,3,7],0,0,0,0,0,1,.1,0],[.492,.656,60,96,[0,3,7],[0,3,7],0,0,0,0,0,0,.1,0],[.547,.43,69,140,[0,3,7],[0,3,7],0,0,0,0,0,1,.1,0],[.094,.414,95,5,[2,3,7,8,10],[2,3,7,8,10],0,0,0,.2,0,0,0,0],[.617,.172,44,45,[0,3,7,8],[0,3,7,8],0,0,0,.2,0,0,0,0],[.422,.352,45,8,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[0,.859,45,3,[0,7],[0,7],0,0,0,0,0,0,.1,0],[.516,.375,51,63,[0,3,7],[0,3,7],0,0,0,0,0,0,.1,0],[.547,.656,41,1,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.414,.531,76,10,[2,3,7,10],[2,3,7,10],0,0,0,.4,0,0,.1,0],[.68,.141,62,57,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[0,.859,56,20,[0,7],[0,7],0,1,0,0,0,0,.5,0],[.102,0,55,137,[0,7],[0,7],.3,0,0,3.8,1,1,.5,.43],[.453,.969,68,46,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.383,.148,67,84,[0,3,7],[0,3,7],0,0,0,.1,0,0,.1,0],[.344,.117,77,93,[0,3,7],[0,3,7],0,0,1,0,0,0,.1,.08],[.078,.891,46,57,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.023,.086,74,30,[0,3,7],[0,3,7],0,0,1,.3,0,0,0,.05],[0,.852,94,55,[0,7],[0,7],0,0,0,0,0,1,2.1,0],[.453,.992,58,74,[0,3,7],[0,3,7],0,0,0,.1,0,0,.1,0],[.859,.125,32,110,[0,3,7],[0,3,7],0,0,0,0,0,1,.1,.1],[.445,.406,41,59,[0,3,7],[0,3,7],0,0,1,.2,0,0,0,.03],[.109,.086,55,154,[0,3,7],[0,3,7],0,0,0,1.9,0,1,.1,0],[.141,.758,55,4,[2,3,7,10],[2,3,7,10],0,0,0,1.1,0,0,0,.19],[.789,.023,64,165,[0,3,7],[0,3,7],0,.88,1,0,0,1,.1,.05],[.391,.312,49,121,[0,3,7],[0,3,7],0,1,0,0,0,1,.1,0],[.547,.469,150,6,[2,3,7,10],[2,3,7,10],0,0,0,0,0,0,0,0],[.539,.406,61,59,[0,3,7],[0,3,7],0,0,0,0,0,0,.1,0],[.016,.117,51,55,[0,3,7],[0,3,7],0,0,0,1.6,0,0,.2,0],[.305,.18,75,101,[0,3,7],[0,3,7],0,0,0,.1,0,0,.1,0],[.586,.055,40,158,[0,3,7],[0,3,7],0,0,1,.5,0,1,.3,.05],[.57,.891,57,167,[0,3,7],[0,3,7],0,0,0,0,0,1,.3,0],[.406,.047,115,10,[2,3,7,10],[2,3,7,10],.3,1,0,.9,0,0,.3,.63],[.633,.047,51,25,[0,3,7],[0,3,7],0,0,0,.1,0,0,0,0],[.477,.633,79,37,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.078,.492,40,0,[2,3,7,8,10],[2,3,7,8,10],0,0,0,.1,0,0,0,0],[.312,.148,53,14,[0,3,7],[0,3,7],0,0,0,.1,0,0,0,0],[.406,.047,148,27,[2,3,7,10],[2,3,7,10],.5,0,0,1.1,0,1,.6,.05],[.594,.391,80,63,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.602,.273,42,3,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.594,.078,40,1,[0,3,7],[0,3,7],0,0,1,.1,0,0,0,.04],[.289,.969,82,196,[0,3,7],[0,7],0,0,0,0,0,1,.4,0],[.523,.742,48,79,[0,3,7],[0,3,7],0,0,0,0,0,0,.1,0],[.078,.711,78,24,[2,3,7,8,10],[2,3,7,8,10],0,0,0,.5,0,0,.1,0],[.516,.188,48,124,[0,3,7],[0,3,7],0,0,0,.1,0,1,.1,0],[.406,.047,52,12,[2,3,7,10],[2,3,7,10],0,0,0,1,0,0,.3,.12],[.57,.211,64,78,[0,3,7],[0,3,7],0,0,1,0,0,0,.1,.04],[.641,.219,54,30,[0,3,7],[0,3,7],0,0,0,.1,0,0,0,0],[.523,.617,44,6,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.055,.055,81,2,[2,3,7,10],[2,3,7,10],.2,0,0,.3,0,0,0,0],[.414,.047,40,3,[2,3,7,10],[2,3,7,10],0,0,0,.2,0,0,.1,.22],[.562,.211,66,34,[0,3,7],[0,3,7],0,1,0,.2,0,0,0,0],[.672,.078,66,54,[0,3,7],[0,3,7],0,0,0,.1,0,0,0,0],[.172,.453,60,57,[0,3,7],[0,3,7],0,.42,0,0,0,0,.1,0],[.508,.43,44,70,[0,3,7],[0,3,7],0,0,0,0,0,0,.1,0],[.438,.078,51,44,[0,3,7],[0,3,7],.6,0,1,.5,0,0,.1,.06],[.445,.094,45,9,[0,3,7],[0,3,7],0,0,0,.5,0,0,0,.34],[.703,.141,47,141,[0,3,7],[0,3,7],0,.4,1,0,0,1,.1,.04],[.539,.5,71,15,[2,3,7,10],[2,3,7,10],0,0,0,0,0,0,0,0],[0,.008,42,87,[0,3,7],[0,3,7],0,0,0,1.4,0,0,.1,.24],[.391,.039,0,29,[2,3,7,10],[2,3,7,10],0,0,0,2.2,0,1,.7,.88],[.578,.156,45,79,[0,3,7],[0,3,7],0,0,0,.1,0,0,.1,0],[.477,.758,46,52,[0,3,7],[0,3,7],0,.87,0,0,0,0,.1,0],[.602,.023,74,110,[0,3,7],[0,3,7],0,0,1,.4,0,1,.2,.38],[.633,.047,58,117,[0,3,7],[0,3,7],0,0,1,0,0,1,.1,.08],[.391,.039,75,12,[2,3,7,10],[2,3,7,10],0,0,0,.7,0,0,.3,.28],[.547,.922,73,72,[0,3,7],[0,3,7],0,0,0,0,0,0,.1,0],[.578,.742,70,37,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.211,.57,77,190,[0,3,7],[0,3,7],0,0,0,0,0,1,.1,.06],[.008,.852,51,14,[0,7],[0,7],0,0,0,0,0,0,.8,0],[.117,.266,65,79,[2,3,7,10],[2,3,7,10],0,0,0,2.5,0,1,.1,.6],[.391,.039,76,32,[2,3,7,10],[2,3,7,10],.7,0,0,2.7,0,1,.8,.58],[.484,.43,66,21,[0,3,7],[0,3,7],0,0,0,0,0,0,.1,0],[0,.867,61,6,[0,7],[0,7],0,0,0,0,0,0,0,0],[.172,.477,84,139,[0,3,7],[0,3,7],0,0,0,0,0,1,.3,0],[.539,.391,69,33,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.062,.586,44,36,[2,3,7,8,10],[2,3,7,8,10],0,.62,0,.8,0,0,.1,0],[.047,.531,44,8,[2,3,7,8,10],[2,3,7,8,10],0,0,0,.4,0,0,0,0],[.469,.031,62,71,[0,3,7],[0,3,7],.4,0,0,.5,0,0,.1,0],[.406,.047,89,8,[2,3,7,10],[2,3,7,10],0,0,0,.5,0,0,.2,.37],[.188,.578,46,40,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.219,.961,80,30,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.5,.469,41,1,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.641,.5,58,85,[0,3,7],[0,3,7],0,1,0,0,0,0,.1,0],[.594,.062,71,167,[0,3,7],[0,3,7],0,0,1,.1,0,1,.1,.1],[.406,.703,74,149,[0,3,7],[0,3,7],0,0,0,0,0,1,.2,0],[0,.852,47,11,[0,7],[0,7],0,1,0,0,0,0,.6,0],[.664,.047,41,185,[0,3,7],[0,3,7],0,0,1,.1,0,1,.2,.08],[.008,.852,89,38,[0,7],[0,7],0,0,0,0,0,1,1.8,0],[.414,.055,40,0,[2,3,7],[2,3,7],0,0,0,.1,0,0,0,0],[.406,.047,102,18,[2,3,7,10],[2,3,7,10],0,0,0,1.2,0,1,.5,.76],[.047,.289,0,16,[2,3,7,10],[2,3,7,10],0,1,0,1.6,0,1,.1,.48],[.406,.047,9,17,[2,3,7,10],[2,3,7,10],0,1,0,.9,0,1,.4,.03],[.57,.258,65,40,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.406,.047,96,12,[2,3,7,10],[2,3,7,10],.3,0,0,1.3,0,0,.3,.7],[.461,.539,83,1,[2,3,7,10],[2,3,7,10],0,.64,0,.1,0,0,0,0],[.398,.336,60,24,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.031,.789,48,57,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.484,.586,49,105,[0,3,7],[0,3,7],0,0,0,0,0,0,.1,0],[.031,0,41,1,[0,3,7],[0,3,7],0,0,0,.4,0,0,0,.19],[.555,.672,57,162,[0,3,7],[0,3,7],0,0,0,0,0,1,.1,0],[.5,.859,71,82,[0,3,7],[0,3,7],0,0,0,0,0,0,.1,0],[0,.805,46,4,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.484,.461,55,46,[0,3,7],[0,3,7],0,0,0,0,0,0,.1,0],[.438,.609,47,78,[0,3,7],[0,3,7],0,0,0,0,0,0,.1,0],[.07,.492,110,8,[2,3,7,8,10],[2,3,7,8,10],0,0,0,.2,0,0,0,0],[.406,.047,44,16,[2,3,7],[2,3,7],.2,0,0,.9,0,1,.4,.24],[.609,.234,42,4,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.375,.734,55,12,[0,3,7],[0,3,7],0,1,0,0,0,0,0,0],[.055,.289,52,5,[2,3,7,10],[2,3,7,10],0,0,0,.8,0,0,.1,.38],[.641,.047,67,180,[0,3,7],[0,3,7],0,0,0,.2,0,1,.1,0],[.406,.047,41,5,[2,3,7],[2,3,7],0,0,0,.5,0,0,.1,.24],[.156,.25,35,126,[2,7],[2,7],0,0,0,3.8,1,1,.3,0],[.477,.484,85,140,[0,3,7],[0,3,7],0,0,0,0,0,1,.2,0],[.633,0,52,57,[0,3,7],[0,3,7],.2,0,1,0,0,0,.1,.05],[.68,.938,51,9,[2,3,7,10],[2,3,7,10],0,0,0,1.5,0,0,.1,.22],[.633,.633,63,155,[0,3,7],[0,3,7],0,.38,0,0,0,1,.1,0],[.68,.938,73,42,[2,3,7,10],[2,3,7,10],0,0,0,3.1,1,1,.7,.22],[.391,.039,70,22,[2,3,7,10],[2,3,7,10],.3,0,0,1.2,0,1,.6,.52],[.047,.289,40,0,[2,3,7,10],[2,3,7,10],0,0,0,.3,0,0,0,.24],[.047,.938,55,9,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.062,.555,64,17,[2,3,7,8,10],[2,3,7,8,10],0,0,0,.9,0,0,.1,0],[.141,0,22,85,[0,7],[0,7],.5,0,1,7.7,3,1,.9,.01],[0,.812,46,30,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.164,.469,66,64,[0,3,7],[0,3,7],0,0,0,0,0,0,.1,0],[.711,.109,46,12,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.055,.289,43,1,[2,3,7,10],[2,3,7,10],0,0,0,.3,0,0,0,.24],[.523,.195,46,11,[0,3,7],[0,3,7],0,0,0,0,0,0,0,0],[.398,.016,78,130,[0,3,7],[0,3,7],0,0,1,1.6,0,1,.4,.96],[.414,.047,0,18,[2,3,7,10],[2,3,7,10],.4,1,0,.8,0,1,.4,.42],[.852,.156,70,186,[0,3,7],[0,3,7],0,0,0,0,0,1,.1,0],[.766,.078,41,7,[0,3,7],[0,3,7],0,0,0,.1,0,0,0,0],[.484,.539,84,4,[2,3,7,10],[2,3,7,10],0,0,0,.1,0,0,0,0],[.57,.375,71,146,[0,3,7],[0,3,7],0,0,0,0,0,1,.1,0]];
+
+// Decomposition field (32x32 flat) — drives terrain height
+const F_DECOMP = [4.5,3.1,4.4,2.7,.7,3.7,1,1.4,3.6,3.4,3.5,2.4,1.2,1.1,1.2,.9,.4,.5,.7,1.1,.9,1,.8,.6,.9,.5,.1,.1,.2,.1,.1,0,8.6,4,5.4,3.6,.6,3.4,1.1,1.3,1.7,4,2.2,1,.9,1.4,1.6,1,1.4,2.5,1.6,1.5,1.5,.9,.9,.7,.3,.3,.2,.2,.2,.1,.2,.1,4.9,2.1,3.3,1.5,.3,.5,.3,.4,1.5,2.5,1.4,1.3,1.5,2.3,2.2,1.9,1.4,1.8,1.1,.9,1.5,1.2,1.1,.9,.8,.8,.3,.2,.2,.1,.2,.1,5.2,1.9,2.9,1.6,1.8,1.7,2.5,1,4.5,3.1,1,1,1.2,2,1.9,1.6,.9,.6,3.1,.7,.5,1.3,1.3,1,1.6,1.9,.4,.3,.2,.2,.2,.1,4.2,.8,2.3,1.3,1.7,.8,1.2,1.3,2.3,1.1,1.6,.7,.6,1,1.3,1,.6,.7,.3,.2,.2,.4,.4,.4,.8,.6,.2,.2,.2,.2,.2,.2,4.3,2,4.2,1.1,1.4,1,1.2,.6,1.6,2.2,.5,.8,.6,.4,.4,.5,.3,.3,.2,.2,.2,.2,.2,.3,.3,.2,.2,.2,.2,.1,.1,.1,1.8,2.1,2.2,.9,.9,.6,1,2.2,1.8,1.1,.6,1,1.5,.3,.2,1.4,.5,.2,.3,.4,.3,.3,.2,.2,.3,1.9,.2,.2,.2,.1,.2,.2,1.5,2.4,1.6,.8,.9,.5,.8,1.5,.7,.7,1.1,.9,.6,.3,1.4,.4,.4,.2,.3,.3,.2,.3,.3,.2,.2,.2,.1,.2,.2,.2,.3,.1,2.6,2,3.9,2.9,1.3,2.7,.7,2.5,1.8,1.6,.3,.9,.6,.6,1.3,1.2,.7,.4,.3,.2,.1,.2,.1,.2,.2,.2,.2,.1,.2,.1,.2,.9,4.3,7.4,8.5,2.7,1.3,2,.3,.3,.6,.6,.3,.3,.5,.7,.9,1.4,1.2,.7,.4,.2,.1,.1,.1,.1,.1,.1,.4,.2,.1,.1,.2,.7,7,9.1,8.9,6.5,1.4,1.5,1,.2,.8,.4,.3,.5,.5,.3,.3,.4,.6,.5,.5,.2,.1,.2,.1,.1,.1,.2,.3,.2,.1,.1,.1,.1,13.4,11.6,6.9,7.1,.2,.1,1,1.7,1.8,.7,.5,.2,.3,.3,.3,.6,.2,.3,.7,.3,.1,0,.1,.1,.1,.3,.9,.3,.2,.2,.2,.3,15.2,12.7,11,4.7,.9,1.3,.8,.3,.8,2.1,.5,.7,.3,.2,.3,.3,.4,1.9,.7,.2,.1,.1,.1,.1,.1,.3,.5,.3,.2,.2,.3,.2,16.6,8.9,16.4,3,6.5,1.1,1.6,.8,1.2,2.3,.7,.9,1.6,.7,.3,.7,.9,2.8,.6,.3,.1,.1,.2,.1,.1,.2,.2,.2,.2,.1,.4,.4,12.9,18.4,17.3,5.3,2.6,.6,.9,1.7,1.9,3.1,.8,.8,.3,.2,.2,.4,1,1.2,.4,.3,.1,.2,1.9,.1,.1,.1,.1,.1,.1,.2,.8,2.3,7.8,8,4,3.5,.2,1.3,2.4,2.9,2.2,2.9,1.4,.5,.2,.1,.2,.2,1.1,.7,.5,.3,.2,.2,.5,.1,.3,.2,.2,.2,.2,.2,.3,.2,2,2.6,4,1.5,3.6,2.3,1.1,.8,1.7,1.4,1.1,.8,.2,.1,1.1,.3,1.1,1.1,.8,.2,.2,.2,.5,.2,.1,.2,.1,.3,.2,.1,.8,0,1.7,.1,2.1,2,1.6,1.5,2,2.3,.2,1.1,.4,.3,.1,.1,.4,.6,.7,.4,.2,.2,.4,.2,.3,.2,.3,.5,.1,.1,.4,1.2,.1,.1,3.3,0,.2,4.5,1.9,.2,1.4,.7,.5,.6,1.4,.2,.1,.1,.2,.4,.1,.2,.3,.3,.2,1.5,.4,.4,.3,.5,.3,.1,.5,.3,.3,.5,.1,1.2,2.5,.2,1,1.3,0,.1,.2,1.8,.3,.2,1.7,.1,2,.5,1.2,0,.1,1.5,.3,.6,1.1,.3,.3,.3,.1,.2,.5,.5,.3,.6,1.7,.9,.1,1.6,2.6,.1,.1,0,.1,.5,.4,.2,.1,0,.1,.1,.3,.5,.2,0,.6,.9,.9,.5,.2,.1,.2,.4,.3,.2,.2,.7,0,1.1,3.4,0,0,1.5,.1,0,.1,.8,.6,.2,1.3,.3,0,.2,.7,.8,.1,0,.3,1,.6,.6,.3,.3,.1,.2,.2,1.7,2.2,.5,1.2,0,1.5,.1,0,0,0,.9,.1,.3,.6,.2,.1,.1,.1,.1,0,.3,.3,0,.3,.7,.7,.2,.2,.4,.3,.1,.2,1.5,1.5,.3,1.2,1.9,2.2,.1,.1,0,1.7,0,0,.1,.2,0,0,0,.1,.4,.1,0,.1,.1,.7,.3,.1,.9,.2,.2,.2,0,.3,.3,.7,.1,0,0,.1,1.1,2.7,.1,0,0,0,0,0,0,0,0,.1,.1,.3,.1,0,0,.1,.1,.4,.4,.5,.1,0,0,.4,.4,0,0,1.3,.1,.1,2,1.5,1.4,0,.1,0,0,0,0,.2,0,.3,0,0,0,.8,0,0,.3,.2,.6,.2,.9,.3,0,.3,0,.2,.3,0,0,0,0,1.8,0,0,0,0,0,0,0,.1,0,0,0,0,0,.1,.1,0,0,0,.1,0,.1,.1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,.1,0,0,0,.2,.1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,.9,0,0,0,0,0,0,0,0,0,0,.2,.1,0,0,.1,0,0,.1,0,0,0,0,0,0,.4,.3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,.1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,.1,0,0,0,0,0,0,0,0,0,0,0,0,0,.2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,.1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,.2,0,0,0];
+const F_TOXIC = [.2,.2,.2,.3,.3,.3,.2,.1,.1,.1,0,0,0,0,0,0,0,0,0,0,.1,.1,0,.1,0,0,0,.2,0,0,0,0,.2,.4,.2,.2,.3,.2,.2,.2,.1,.2,0,0,0,0,0,0,0,0,0,0,.1,.1,.1,.1,.1,0,0,0,0,0,0,0,.2,.3,.2,.2,.2,.2,.2,.2,.1,.1,0,0,0,0,0,0,0,0,0,0,.1,.1,.1,.1,0,0,0,0,0,0,0,0,.4,.2,.2,.2,.2,.2,.2,.1,.1,.1,0,0,0,0,0,0,.1,0,0,0,.1,.1,.1,0,0,0,0,0,0,0,0,0,.5,.3,.2,.2,.2,.2,.2,.1,.1,0,0,0,0,0,.1,.1,.1,.1,0,0,0,.1,.1,0,0,0,0,0,0,0,0,0,.3,.3,.2,.2,.2,.2,.1,.1,.1,0,0,0,0,0,.1,.1,.1,.1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,.2,.2,.2,.2,.2,.2,.2,.1,.1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,.2,.2,.2,.2,.2,.1,.1,.1,.1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,.1,.1,.1,.1,.1,.2,.1,.1,.1,.1,0,0,0,0,.1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,.1,0,0,0,.1,.1,.2,.1,.1,.1,.1,.1,.1,.1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,.1,.2,0,.1,0,.1,.1,.2,.2,.1,.1,.1,.1,.1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,.1,0,.1,.1,.1,.2,.2,.2,.1,.1,.1,.1,.1,.1,0,0,0,0,0,0,0,0,0,0,0,0,0,.1,.1,.1,.1,0,0,.1,.2,.1,.1,.2,.2,.2,.1,.1,.1,0,0,0,0,0,0,0,0,0,0,.1,0,.1,0,0,0,.1,0,0,.1,.1,.1,.1,.2,.1,.1,.2,.2,.2,.1,.1,0,0,0,0,0,0,0,0,0,0,0,.1,.1,.1,.1,0,0,0,0,0,.1,.1,.1,.1,.1,.1,.1,.2,.2,.2,.1,0,0,0,0,0,0,0,0,0,0,0,0,.1,.1,.1,.1,.1,0,0,0,0,.1,.1,.3,.1,.1,.1,.1,.2,.2,.2,.1,.1,0,0,0,0,0,.1,0,0,0,0,0,.1,.1,.1,.1,.1,0,0,0,0,0,.1,.1,.2,.2,.2,.2,.2,.2,.2,.1,.1,0,0,0,0,.1,.1,.1,.1,.1,.1,.1,.1,.1,0,0,0,0,0,0,0,0,0,0,.2,.3,.2,.2,.2,.2,.1,.1,.1,0,0,0,.1,.1,.1,.2,.1,.1,.1,.1,.1,0,0,0,0,0,0,0,0,.1,0,0,.2,.3,.3,.2,.2,.2,.1,.1,.1,0,0,0,0,.1,.1,.1,.1,.1,.1,.1,0,0,0,0,0,0,0,0,.1,0,0,0,.2,.2,.2,.2,.2,.2,.1,.1,.1,0,0,0,.1,.1,.1,.1,.1,.1,.1,.1,0,0,0,0,0,0,0,0,0,0,0,0,.2,.2,.2,.1,.2,.1,.1,.1,.1,0,0,0,.1,.1,0,0,.1,.1,.1,.1,0,0,0,0,0,0,0,0,0,0,0,0,.1,.1,.1,.1,.1,.1,.1,.1,0,0,0,0,.1,0,0,0,0,0,.1,.1,0,0,0,0,0,0,0,0,0,.1,.1,0,.1,.1,.1,.1,.1,.1,.1,.1,0,0,0,0,.1,.1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,.1,.1,.1,.1,.1,.1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,.1,0,0,0,.1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+const F_FUNGAL = [2,3,3.9,3.1,1.7,1.6,.8,1.2,3.1,4.4,4.5,3.8,3.4,3.2,3,2.2,1.2,.8,.8,.8,.5,.2,.1,.1,.1,.1,.2,.1,.1,0,0,.6,3.3,4.1,5,4.1,2.1,1.6,.9,1.5,3,4.7,4.8,4.3,4.5,4.6,4.4,3.6,2.5,2.1,1.5,1.3,.9,.5,.4,.6,.8,.9,.8,.7,.4,.1,.2,1.1,3,3.7,4.2,3.3,1.8,1.1,.7,1.3,3.1,4.6,4.7,4.6,4.7,4.9,4.7,4,2.8,2,1.2,.8,.7,.7,.9,1.3,1.8,1.8,1.4,.9,.5,.1,.2,1.1,2.1,2.4,3,2.3,1.6,1.3,1.2,1.6,3.8,4.6,4.2,3.9,3.6,3.7,3.5,3,1.9,1,.5,.2,.1,.3,.8,1.3,2,1.9,1.2,.7,.3,0,.1,.7,1.3,1.5,1.9,1.7,1.3,1.1,1.1,1.3,2.5,2.9,3,2.4,1.9,1.9,1.9,1.5,.9,.2,0,0,0,0,.1,.5,1.1,1,.5,.1,0,0,0,.3,.8,1.2,1.5,1.1,.9,.9,.9,.8,1.5,2,1.3,1.1,.8,.5,.6,.5,.2,0,0,0,0,0,0,0,.1,.1,0,0,0,0,0,.1,.8,1.3,1.2,.8,.8,.6,.7,1,1,.9,.6,.7,.6,.1,0,.3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,.1,1,1.7,1.5,.9,.7,.4,.3,.6,.3,.3,.4,.4,.1,0,.2,.1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,.1,1.8,2.5,3,2.1,1,1,.3,.2,.3,.4,0,.1,0,.1,.5,.6,.6,.4,.1,0,0,0,0,0,0,0,0,0,0,0,.1,.8,3,4.4,4.6,2.8,1.2,.5,.1,0,0,.1,0,0,0,.1,.5,.8,1,.8,.3,0,0,0,0,0,0,0,0,0,0,0,.1,1.2,3.5,4.8,4.8,3.3,1.3,.4,.1,0,.1,0,0,0,0,0,.1,.4,.6,.6,.4,.1,0,0,0,0,0,0,0,0,0,0,.1,1.2,4.2,4.8,4.4,3.2,1.1,.1,.1,.3,.1,0,0,0,0,.1,.2,.4,.4,.6,.6,.1,0,0,0,0,0,0,.1,0,0,0,.2,1.4,4,4.8,4.1,2.9,1.2,.3,.1,.1,.1,.2,.3,.4,.3,.3,.4,.5,.9,1.4,.8,.1,0,0,0,0,0,0,.1,0,0,0,.3,1.4,3.5,4.2,4.3,2.5,1.4,.3,0,.1,.3,.9,.9,1,.8,.6,.5,.8,1.4,2.1,1.1,.2,0,0,0,0,0,0,0,0,0,0,.5,1.4,2.9,3.9,3.9,2.1,1,.1,.1,.2,.4,1.3,1.4,1.4,.8,.4,.3,.6,1,1.2,.6,.1,0,0,0,0,0,0,0,0,0,0,.6,1.5,1.8,2.2,1.8,1.2,.4,.1,.1,.2,.4,1.3,1.7,1.4,.6,.1,0,.1,.3,.2,.1,0,0,0,0,0,0,0,0,0,0,0,.3,.7,.6,.6,.7,.4,.2,.1,.1,.1,.4,1,1.3,1,.3,0,.1,0,0,.2,.1,0,0,0,0,0,0,0,0,0,0,0,.1,.1,.1,0,.2,.1,0,.1,0,.1,.2,.7,.7,.3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,.1,0,0,.1,0,0,.1,.2,0,.1,.1,.1,.4,.4,0,0,0,0,0,0,0,0,0,0,.1,0,0,0,0,0,0,0,0,0,0,0,0,.1,0,.1,.1,0,0,.1,.6,.3,0,0,0,0,.1,.2,0,0,0,0,.2,.2,0,0,0,0,0,.1,.2,.2,.3,.3,.1,0,0,.1,0,0,0,.3,.9,.8,.2,0,0,0,0,0,0,0,0,.1,.4,.4,.2,0,0,0,.1,.3,.7,.9,.9,.3,.1,.1,0,0,0,0,0,.3,1.2,1.2,.3,.1,0,0,0,.1,.1,0,0,0,.2,.3,.2,0,0,0,.1,.6,2,2.2,1.3,.3,0,.1,0,0,0,0,.1,.2,.8,.9,.2,0,0,0,0,0,0,0,0,.1,.2,.2,0,0,0,0,.1,.7,2.1,2.1,1.1,.1,0,.1,0,0,0,0,0,0,.2,.3,0,0,0,0,0,0,0,0,0,.1,.1,0,.1,0,0,0,0,.5,1.2,1.2,.5,0,0,0,.1,.1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,.1,.1,0,0,0,0,.2,.3,.2,0,0,0,0,.1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,.1,0,0,0,0,.1,0,.1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,.1,.1,0,0,0,0,0,0,.1,.1,.1,.1,.1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,.5,.9,1.2,1,.5,.3,.1,.2,.8,1.4,1.5,1.3,1.2,1.1,.9,.5,.2,.1,.1,.1,0,0,0,0,0,0,0,0,0,0,0,.1];
+
+// ═══════════════════════════════════════════════════════════
+// SCENE SETUP
+// ═══════════════════════════════════════════════════════════
+const W = window.innerWidth, H = window.innerHeight;
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x050805, 0.018);
+scene.background = new THREE.Color(0x050805);
+
+const camera = new THREE.PerspectiveCamera(45, W / H, 0.1, 200);
+camera.position.set(30, 25, 30);
+camera.lookAt(0, 0, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setSize(W, H);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+document.body.appendChild(renderer.domElement);
+
+// Lights
+const ambient = new THREE.AmbientLight(0x1a2a15, 0.4);
+scene.add(ambient);
+const sun = new THREE.DirectionalLight(0xd4c9a8, 0.6);
+sun.position.set(15, 30, 10);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+sun.shadow.camera.far = 80;
+sun.shadow.camera.left = sun.shadow.camera.bottom = -30;
+sun.shadow.camera.right = sun.shadow.camera.top = 30;
+scene.add(sun);
+const rim = new THREE.DirectionalLight(0x4a8060, 0.3);
+rim.position.set(-10, 10, -15);
+scene.add(rim);
+const underglow = new THREE.PointLight(0x30ff60, 0.4, 40);
+underglow.position.set(0, -3, 0);
+scene.add(underglow);
+
+// ═══════════════════════════════════════════════════════════
+// TERRAIN
+// ═══════════════════════════════════════════════════════════
+const SCALE = 1.0;
+const terrainGeo = new THREE.PlaneGeometry(GS * SCALE, GS * SCALE, GS - 1, GS - 1);
+terrainGeo.rotateX(-Math.PI / 2);
+
+const positions = terrainGeo.attributes.position;
+const colors = new Float32Array(positions.count * 3);
+
+for (let i = 0; i < positions.count; i++) {
+  const ix = i % GS;
+  const iz = Math.floor(i / GS);
+  const fi = iz * GS + ix;
+
+  const decomp = F_DECOMP[fi] || 0;
+  const toxic = F_TOXIC[fi] || 0;
+  const fungal = F_FUNGAL[fi] || 0;
+
+  // Height from decomposition (organic accumulation)
+  const height = decomp * 0.35 + fungal * 0.08;
+  positions.setY(i, height);
+
+  // Color: blend fungal (cyan-green) vs toxic (amber-red) vs base (dark earth)
+  const baseR = 0.04 + decomp * 0.015;
+  const baseG = 0.06 + decomp * 0.01;
+  const baseB = 0.03 + decomp * 0.005;
+
+  const toxR = toxic * 0.6;
+  const toxG = toxic * 0.15;
+  const toxB = toxic * 0.02;
+
+  const funR = fungal * 0.01;
+  const funG = fungal * 0.08;
+  const funB = fungal * 0.06;
+
+  colors[i * 3] = Math.min(baseR + toxR + funR, 1);
+  colors[i * 3 + 1] = Math.min(baseG + toxG + funG, 1);
+  colors[i * 3 + 2] = Math.min(baseB + toxB + funB, 1);
+}
+terrainGeo.computeVertexNormals();
+terrainGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+const terrainMat = new THREE.MeshStandardMaterial({
+  vertexColors: true, roughness: 0.85, metalness: 0.1,
+  side: THREE.DoubleSide
+});
+const terrain = new THREE.Mesh(terrainGeo, terrainMat);
+terrain.receiveShadow = true;
+scene.add(terrain);
+
+// ═══════════════════════════════════════════════════════════
+// FUNGAL NETWORK (glowing veins)
+// ═══════════════════════════════════════════════════════════
+const fungalPts = [];
+const fungalColors = [];
+const threshold = 1.5;
+for (let iz = 0; iz < GS - 1; iz++) {
+  for (let ix = 0; ix < GS - 1; ix++) {
+    const f = F_FUNGAL[iz * GS + ix];
+    if (f > threshold) {
+      // Check neighbors for connectivity
+      const neighbors = [[1,0],[0,1],[1,1]];
+      for (const [dx, dz] of neighbors) {
+        const nf = F_FUNGAL[(iz + dz) * GS + (ix + dx)];
+        if (nf > threshold * 0.7) {
+          const x1 = (ix - GS / 2) * SCALE;
+          const z1 = (iz - GS / 2) * SCALE;
+          const y1 = (F_DECOMP[iz * GS + ix] || 0) * 0.35 + f * 0.08 + 0.05;
+          const x2 = (ix + dx - GS / 2) * SCALE;
+          const z2 = (iz + dz - GS / 2) * SCALE;
+          const y2 = (F_DECOMP[(iz + dz) * GS + (ix + dx)] || 0) * 0.35 + nf * 0.08 + 0.05;
+          fungalPts.push(x1, y1, z1, x2, y2, z2);
+          const intensity = Math.min(f / 5, 1);
+          fungalColors.push(0.1, 0.8 * intensity, 0.5 * intensity, 0.1, 0.8 * Math.min(nf / 5, 1), 0.5 * Math.min(nf / 5, 1));
+        }
+      }
+    }
+  }
+}
+if (fungalPts.length > 0) {
+  const fungalGeo = new THREE.BufferGeometry();
+  fungalGeo.setAttribute('position', new THREE.Float32BufferAttribute(fungalPts, 3));
+  fungalGeo.setAttribute('color', new THREE.Float32BufferAttribute(fungalColors, 3));
+  const fungalMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.6, linewidth: 1 });
+  const fungalLines = new THREE.LineSegments(fungalGeo, fungalMat);
+  scene.add(fungalLines);
+}
+
+// ═══════════════════════════════════════════════════════════
+// ORGANISMS
+// ═══════════════════════════════════════════════════════════
+const orgGroup = new THREE.Group();
+scene.add(orgGroup);
+const orgMeshes = [];
+
+function getRole(mods) {
+  const hasPhoto = mods.includes(0);
+  const hasConsume = mods.includes(2);
+  if (hasPhoto && !hasConsume) return 'producer';
+  if (hasConsume && !hasPhoto) return 'consumer';
+  if (hasPhoto && hasConsume) return 'composite';
+  return 'other';
+}
+
+function buildOrganism(o) {
+  const [r, c, energy, age, mods, active, vl, hjk, mc, gs, gcp, mature, rel, lys] = o;
+  const role = getRole(mods);
+  const x = (c - 0.5) * GS * SCALE;
+  const z = (r - 0.5) * GS * SCALE;
+
+  // Sample terrain height at position
+  const ix = Math.floor(c * GS);
+  const iz = Math.floor(r * GS);
+  const fi = Math.min(iz * GS + ix, GS * GS - 1);
+  const baseY = (F_DECOMP[fi] || 0) * 0.35 + (F_FUNGAL[fi] || 0) * 0.08;
+
+  const group = new THREE.Group();
+  group.position.set(x, baseY, z);
+
+  const scale = 0.15 + (energy / 150) * 0.25 + mc * 0.15;
+  const stressColor = gs > 2 ? 0xff3030 : gs > 1 ? 0xff8040 : null;
+
+  if (role === 'producer') {
+    // Vertical spire — sessile photosynthesizer
+    const h = scale * (2 + age / 80);
+    const geo = new THREE.ConeGeometry(scale * 0.4, h, 5 + mc * 2);
+    const color = stressColor || (lys > 0.3 ? 0x40a080 : 0x2d8a4e);
+    const mat = new THREE.MeshStandardMaterial({
+      color, roughness: 0.7, metalness: 0.15,
+      emissive: gcp > 0 ? 0xff4020 : (lys > 0.5 ? 0x104030 : 0x000000),
+      emissiveIntensity: gcp > 0 ? 0.5 : (lys > 0.5 ? 0.3 : 0),
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.y = h / 2;
+    mesh.castShadow = true;
+    group.add(mesh);
+
+    // Viral load indicator — small orbiting sphere
+    if (vl > 0.2) {
+      const vgeo = new THREE.SphereGeometry(scale * 0.15, 6, 6);
+      const vmat = new THREE.MeshStandardMaterial({
+        color: 0xcc3060, emissive: 0xcc3060, emissiveIntensity: 0.4,
+        transparent: true, opacity: 0.7
+      });
+      const vmesh = new THREE.Mesh(vgeo, vmat);
+      vmesh.position.set(scale * 0.8, h * 0.6, 0);
+      group.add(vmesh);
+    }
+  } else if (role === 'consumer') {
+    // Angular predatory form
+    const s = scale * 1.2;
+    const geo = new THREE.OctahedronGeometry(s, 0);
+    const color = stressColor || (mods.includes(10) ? 0xd4a040 : 0xc45030);
+    const mat = new THREE.MeshStandardMaterial({
+      color, roughness: 0.5, metalness: 0.3,
+      emissive: hjk > 0.5 ? 0x8020a0 : 0x000000,
+      emissiveIntensity: hjk > 0.5 ? 0.4 : 0,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.y = s;
+    mesh.rotation.y = age * 0.1;
+    mesh.castShadow = true;
+    group.add(mesh);
+  } else if (role === 'composite') {
+    // Layered endosymbiotic form — producer + consumer merged
+    const s = scale * 1.5;
+    // Inner: producer core
+    const innerGeo = new THREE.IcosahedronGeometry(s * 0.5, 1);
+    const innerMat = new THREE.MeshStandardMaterial({
+      color: 0x2d8a4e, roughness: 0.6, metalness: 0.2,
+      emissive: 0x104020, emissiveIntensity: 0.2,
+    });
+    const inner = new THREE.Mesh(innerGeo, innerMat);
+    inner.position.y = s;
+    group.add(inner);
+    // Outer: consumer shell
+    const outerGeo = new THREE.IcosahedronGeometry(s * 0.8, 0);
+    const outerMat = new THREE.MeshStandardMaterial({
+      color: 0xd4a040, roughness: 0.3, metalness: 0.4,
+      transparent: true, opacity: 0.4,
+      emissive: 0x302010, emissiveIntensity: 0.15,
+    });
+    const outer = new THREE.Mesh(outerGeo, outerMat);
+    outer.position.y = s;
+    group.add(outer);
+    outer.castShadow = true;
+  } else {
+    // Other: small sphere
+    const geo = new THREE.SphereGeometry(scale * 0.5, 6, 6);
+    const mat = new THREE.MeshStandardMaterial({ color: 0x808080, roughness: 0.8 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.y = scale;
+    group.add(mesh);
+  }
+
+  // Merger rings
+  for (let m = 0; m < mc; m++) {
+    const ringGeo = new THREE.TorusGeometry(scale * (1 + m * 0.4), scale * 0.04, 8, 16);
+    const ringMat = new THREE.MeshStandardMaterial({
+      color: 0x60d0a0, emissive: 0x40a080, emissiveIntensity: 0.3,
+      transparent: true, opacity: 0.5,
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.position.y = scale * (1.5 + m * 0.3);
+    ring.rotation.x = Math.PI / 2 + m * 0.3;
+    group.add(ring);
+  }
+
+  // Relationship halo
+  if (rel > 0.5) {
+    const haloGeo = new THREE.RingGeometry(scale * 1.2, scale * 1.4, 16);
+    const haloMat = new THREE.MeshBasicMaterial({
+      color: 0x80c0ff, transparent: true, opacity: rel * 0.15,
+      side: THREE.DoubleSide,
+    });
+    const halo = new THREE.Mesh(haloGeo, haloMat);
+    halo.position.y = 0.1;
+    halo.rotation.x = -Math.PI / 2;
+    group.add(halo);
+  }
+
+  group.userData = { role, energy, age, mods, mc, gs: gs, gcp, mature, vl, hjk, lys, rel };
+  orgGroup.add(group);
+  orgMeshes.push(group);
+}
+
+ORGS.forEach(o => buildOrganism(o));
+
+// ═══════════════════════════════════════════════════════════
+// PARTICLES — spores / mediator signals
+// ═══════════════════════════════════════════════════════════
+const particleCount = 500;
+const particleGeo = new THREE.BufferGeometry();
+const particlePositions = new Float32Array(particleCount * 3);
+const particleSizes = new Float32Array(particleCount);
+for (let i = 0; i < particleCount; i++) {
+  particlePositions[i * 3] = (Math.random() - 0.5) * GS * SCALE;
+  particlePositions[i * 3 + 1] = Math.random() * 8 + 0.5;
+  particlePositions[i * 3 + 2] = (Math.random() - 0.5) * GS * SCALE;
+  particleSizes[i] = Math.random() * 2 + 0.5;
+}
+particleGeo.setAttribute('position', new THREE.Float32BufferAttribute(particlePositions, 3));
+particleGeo.setAttribute('size', new THREE.Float32BufferAttribute(particleSizes, 1));
+const particleMat = new THREE.PointsMaterial({
+  color: 0x80e0a0, size: 0.08, transparent: true, opacity: 0.3,
+  sizeAttenuation: true, blending: THREE.AdditiveBlending,
+});
+const particles = new THREE.Points(particleGeo, particleMat);
+scene.add(particles);
+
+// ═══════════════════════════════════════════════════════════
+// INTERACTION
+// ═══════════════════════════════════════════════════════════
+let autoRotate = true;
+let viewMode = 'terrain';
+let mouseX = 0, mouseY = 0;
+let targetCamX = 30, targetCamY = 25, targetCamZ = 30;
+let isDragging = false, prevMX = 0, prevMY = 0;
+let camAngle = Math.PI / 4, camDist = 42, camHeight = 25;
+
+document.addEventListener('mousedown', (e) => { isDragging = true; prevMX = e.clientX; prevMY = e.clientY; });
+document.addEventListener('mouseup', () => { isDragging = false; });
+document.addEventListener('mousemove', (e) => {
+  mouseX = e.clientX; mouseY = e.clientY;
+  if (isDragging) {
+    const dx = e.clientX - prevMX;
+    const dy = e.clientY - prevMY;
+    camAngle += dx * 0.005;
+    camHeight = Math.max(5, Math.min(45, camHeight - dy * 0.1));
+    prevMX = e.clientX; prevMY = e.clientY;
+    autoRotate = false;
+    document.getElementById('btnRotate').classList.remove('active');
+  }
+});
+document.addEventListener('wheel', (e) => {
+  camDist = Math.max(15, Math.min(70, camDist + e.deltaY * 0.03));
+});
+
+function setView(mode) {
+  viewMode = mode;
+  document.querySelectorAll('#controls button').forEach(b => {
+    if (b.id !== 'btnRotate') b.classList.remove('active');
+  });
+  document.getElementById('btn' + mode.charAt(0).toUpperCase() + mode.slice(1)).classList.add('active');
+
+  if (mode === 'terrain') { camDist = 42; camHeight = 25; }
+  else if (mode === 'field') { camDist = 50; camHeight = 38; }
+  else if (mode === 'organism') { camDist = 25; camHeight = 12; }
+}
+
+function toggleRotate() {
+  autoRotate = !autoRotate;
+  document.getElementById('btnRotate').classList.toggle('active', autoRotate);
+}
+
+// ═══════════════════════════════════════════════════════════
+// STATS
+// ═══════════════════════════════════════════════════════════
+const statsEl = document.getElementById('stats');
+statsEl.innerHTML = `PRODUCERS 373 · HERBIVORES 140 · CARNIVORES 22<br>MERGERS 34 · COMPOSITES 82 · CASCADING 18`;
+
+// ═══════════════════════════════════════════════════════════
+// RAYCASTER FOR TOOLTIPS
+// ═══════════════════════════════════════════════════════════
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+const tooltipEl = document.getElementById('tooltip');
+let hoveredOrg = null;
+
+function updateTooltip() {
+  mouse.x = (mouseX / W) * 2 - 1;
+  mouse.y = -(mouseY / H) * 2 + 1;
+  raycaster.setFromCamera(mouse, camera);
+
+  let closest = null;
+  let closestDist = 3;
+
+  for (const org of orgMeshes) {
+    const dist = raycaster.ray.distanceToPoint(org.position);
+    if (dist < closestDist) {
+      closestDist = dist;
+      closest = org;
+    }
+  }
+
+  if (closest && closest !== hoveredOrg) {
+    hoveredOrg = closest;
+    const d = closest.userData;
+    const modNames = d.mods.map(m => MODULE_NAMES[m]).join(' · ');
+    let status = [];
+    if (d.mc > 0) status.push(`COMPOSITE (${d.mc}× merged)`);
+    if (d.gcp > 0) status.push('GENOMIC CASCADE');
+    if (d.vl > 0.2) status.push(`VIRAL LOAD ${d.vl.toFixed(1)}`);
+    if (d.hjk > 0.3) status.push('HIJACKED');
+    if (d.lys > 0.3) status.push(`LYSOGENIC ${d.lys.toFixed(1)}`);
+    if (d.rel > 0.5) status.push(`BONDED (${d.rel.toFixed(1)})`);
+
+    tooltipEl.innerHTML = `<b style="color:rgba(180,220,160,0.9)">${d.role.toUpperCase()}</b> · age ${d.age}<br>` +
+      `energy ${d.energy} · stress ${d.gs.toFixed(1)}<br>` +
+      `<span style="opacity:0.6">${modNames}</span>` +
+      (status.length ? `<br><span style="color:rgba(255,180,100,0.8)">${status.join('<br>')}</span>` : '');
+    tooltipEl.style.display = 'block';
+    tooltipEl.style.left = (mouseX + 16) + 'px';
+    tooltipEl.style.top = (mouseY - 16) + 'px';
+  } else if (!closest) {
+    hoveredOrg = null;
+    tooltipEl.style.display = 'none';
+  } else if (hoveredOrg) {
+    tooltipEl.style.left = (mouseX + 16) + 'px';
+    tooltipEl.style.top = (mouseY - 16) + 'px';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ANIMATE
+// ═══════════════════════════════════════════════════════════
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+
+  // Camera
+  if (autoRotate) camAngle += 0.002;
+  camera.position.x = Math.cos(camAngle) * camDist;
+  camera.position.z = Math.sin(camAngle) * camDist;
+  camera.position.y = camHeight;
+  camera.lookAt(0, 3, 0);
+
+  // Animate organisms
+  orgMeshes.forEach((org, i) => {
+    const d = org.userData;
+    // Gentle breathing
+    const breath = 1 + Math.sin(t * 1.5 + i * 0.7) * 0.03;
+    org.scale.setScalar(breath);
+
+    // Cascade organisms pulse red
+    if (d.gcp > 0) {
+      org.children.forEach(child => {
+        if (child.material && child.material.emissiveIntensity !== undefined) {
+          child.material.emissiveIntensity = 0.3 + Math.sin(t * 4 + i) * 0.2;
+        }
+      });
+    }
+
+    // Merger rings rotate
+    org.children.forEach(child => {
+      if (child.geometry && child.geometry.type === 'TorusGeometry') {
+        child.rotation.z = t * 0.5 + i;
+      }
+    });
+  });
+
+  // Particles drift
+  const ppos = particles.geometry.attributes.position;
+  for (let i = 0; i < particleCount; i++) {
+    ppos.array[i * 3 + 1] += Math.sin(t * 0.3 + i * 0.1) * 0.003;
+    ppos.array[i * 3] += Math.cos(t * 0.2 + i * 0.15) * 0.002;
+    if (ppos.array[i * 3 + 1] > 10) ppos.array[i * 3 + 1] = 0.5;
+  }
+  ppos.needsUpdate = true;
+
+  // Underglow pulse
+  underglow.intensity = 0.3 + Math.sin(t * 0.8) * 0.1;
+
+  updateTooltip();
+  renderer.render(scene, camera);
+}
+
+animate();
+
+// Resize
+window.addEventListener('resize', () => {
+  const w = window.innerWidth, h = window.innerHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+});
+</script>
+</body>
+</html>
