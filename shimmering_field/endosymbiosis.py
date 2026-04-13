@@ -69,6 +69,7 @@ class EndosymbiosisMixin:
                         if self.rng.random() < prob:
                             mergers_a.append(a)
                             mergers_b.append(b)
+                            self._flag_merger()
                             merged_set.add(a)
                             merged_set.add(b)
                 # Skip to next potential pair

@@ -16,12 +16,13 @@ from .social import SocialMixin
 from .endosymbiosis import EndosymbiosisMixin
 from .collapse import CollapseMixin
 from .stats import StatsMixin
+from .pivotal_moments import PivotalMomentMixin
 
 
 class World(
     EnvironmentMixin, EnergyMixin, PredationMixin, MovementMixin,
     ReproductionMixin, LifecycleMixin, ViralMixin, SocialMixin,
-    EndosymbiosisMixin, CollapseMixin, StatsMixin,
+    EndosymbiosisMixin, CollapseMixin, StatsMixin, PivotalMomentMixin,
 ):
     """The simulation world. Inherits subsystem methods via mixins."""
 
@@ -114,6 +115,9 @@ class World(
         self.total_manipulated_births = 0
         self.total_hijacked_steps = 0  # cumulative organism-steps under hijack
         self.total_mergers = 0
+
+        # Pivotal moment tracking
+        self._init_pivotal()
 
     @property
     def pop(self):
@@ -259,6 +263,7 @@ class World(
         self._kill_and_decompose()
         self._update_environment()
         self._record_stats(kills)
+        self._detect_pivotal_moments()
         self.timestep += 1
 
     # ── Stats ──

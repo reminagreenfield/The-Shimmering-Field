@@ -100,6 +100,10 @@ def run_simulation(cfg=None):
     with open(os.path.join(cfg.output_dir, "run_summary.json"), 'w') as f:
         json.dump({"config": {k: v for k, v in vars(cfg).items() if not k.startswith('_')},
                    "stats_history": world.stats_history}, f, indent=2)
+
+    # Export pivotal moment index
+    world._export_run_index()
+
     return world
 
 
