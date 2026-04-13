@@ -71,10 +71,15 @@ class PivotalMomentMixin:
         self._pivotal_events = []          # collected during the run
         self._pivotal_pop_history = []     # (timestep, pop) ring buffer for crash detect
         self._pivotal_peak_diversity = 0   # running max unique-species count
-        self._pivotal_peak_complexity = 0  # running max module count on any organism
+        self._pivotal_peak_module_count = 0  # running max module count on any organism
+        self._pivotal_peak_cx_score = 0.0    # running max complexity score
         self._pivotal_merger_flagged = False  # set by _flag_merger, consumed each tick
         self._pivotal_prev_fungal_mean = 0.0
         self._pivotal_prev_pop = 0
+        self._pivotal_export_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "exports")
+        print(f"  Pivotal moments export dir: {self._pivotal_export_dir}")
 
     # ── Hook: called from _attempt_endosymbiosis when a merger succeeds ──
 
@@ -115,14 +120,14 @@ class PivotalMomentMixin:
         # -- 3. New high-module species (4+ modules) --
         mod_counts = self.module_present.sum(axis=1)  # per organism
         max_now = int(mod_counts.max()) if self.pop > 0 else 0
-        if max_now >= 4 and max_now > self._pivotal_peak_complexity:
+        if max_now >= 4 and max_now > self._pivotal_peak_module_count:
             idx = int(np.argmax(mod_counts))
             self._pivotal_events.append(self._make_event(
                 t, "new_high_module_species",
                 {"module_count": max_now,
                  "modules": [MODULE_NAMES[m] for m in range(N_MODULES)
                              if self.module_present[idx, m]]}))
-            self._pivotal_peak_complexity = max_now
+            self._pivotal_peak_module_count = max_now
 
         # -- 4. Peak species diversity --
         # "species" = unique module-present signature
@@ -149,7 +154,8 @@ class PivotalMomentMixin:
                       * (1 + self.merger_count)
                       + self.transfer_count)
         max_cx = float(complexity.max())
-        if max_cx > self._pivotal_peak_complexity:
+        if max_cx > self._pivotal_peak_cx_score:
+            self._pivotal_peak_cx_score = max_cx
             idx = int(np.argmax(complexity))
             self._pivotal_events.append(self._make_event(
                 t, "max_complexity_organism",
@@ -238,9 +244,9 @@ class PivotalMomentMixin:
     def _export_run_index(self):
         """Write all collected pivotal events to a JSON index file."""
         if not self._pivotal_events:
+            print(f"  Pivotal moments: 0 events detected, nothing to export.")
             return
-        out_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                               "exports")
+        out_dir = self._pivotal_export_dir
         os.makedirs(out_dir, exist_ok=True)
         path = os.path.join(out_dir, "pivotal_moments.json")
         with open(path, "w") as f:

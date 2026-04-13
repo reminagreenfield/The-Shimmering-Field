@@ -32,31 +32,34 @@ def run_simulation(cfg=None):
     print(f"{'─' * 160}")
 
     start = time.time()
-    for t in range(cfg.total_timesteps):
-        world.update()
+    try:
+        for t in range(cfg.total_timesteps):
+            world.update()
 
-        if world.timestep % cfg.snapshot_interval == 0:
-            world.save_snapshot(cfg.output_dir)
-            s = world.stats_history[-1]
-            el = time.time() - start
-            r = s["roles"]
-            mc = s["module_counts"]
-            print(
-                f"  t={s['t']:5d}  |  pop={s['pop']:5d}  |  e={s['avg_energy']:5.1f}  |  "
-                f"gen={s['max_gen']:4d}  |  tox={s['toxic_mean']:.3f} ntr={s['nutrient_mean']:.3f}  |  "
-                f"prod={r['producer']:4d} herb={r['herbivore']:3d} carn={r['carnivore']:3d} detr={r['detritivore']:3d} omni={r['omnivore']:3d}  |  "
-                f"sessP={s['sessile_producers']:4d} mobP={s['mobile_producers']:3d} mobC={s['mobile_consumers']:3d}  |  "
-                f"FO={mc['FORAGE']:4d} DE={mc['DEFENSE']:4d} VR={mc['VRESIST']:4d} SO={mc['SOCIAL']:4d} ME={mc['MEDIATE']:3d}  |  "
-                f"lyso={s['lyso_fraction']:.2f} hjk={s['hijack_fraction']:.2f}  |  "
-                f"mrg={s['total_mergers']:3d} comp={s['composite_organisms']:3d}  |  "
-                f"gstr={s['avg_genomic_stress']:.2f} casc={s['cascade_organisms']:3d}  |  "
-                f"clps={s['collapsed_zones']:5d} fng={s['fungal_mean']:.3f}  |  "
-                f"kill={s['kills']:3d}  |  mod={s['avg_modules']:.2f}  |  {el:.1f}s"
-            )
+            if world.timestep % cfg.snapshot_interval == 0:
+                world.save_snapshot(cfg.output_dir)
+                s = world.stats_history[-1]
+                el = time.time() - start
+                r = s["roles"]
+                mc = s["module_counts"]
+                print(
+                    f"  t={s['t']:5d}  |  pop={s['pop']:5d}  |  e={s['avg_energy']:5.1f}  |  "
+                    f"gen={s['max_gen']:4d}  |  tox={s['toxic_mean']:.3f} ntr={s['nutrient_mean']:.3f}  |  "
+                    f"prod={r['producer']:4d} herb={r['herbivore']:3d} carn={r['carnivore']:3d} detr={r['detritivore']:3d} omni={r['omnivore']:3d}  |  "
+                    f"sessP={s['sessile_producers']:4d} mobP={s['mobile_producers']:3d} mobC={s['mobile_consumers']:3d}  |  "
+                    f"FO={mc['FORAGE']:4d} DE={mc['DEFENSE']:4d} VR={mc['VRESIST']:4d} SO={mc['SOCIAL']:4d} ME={mc['MEDIATE']:3d}  |  "
+                    f"lyso={s['lyso_fraction']:.2f} hjk={s['hijack_fraction']:.2f}  |  "
+                    f"mrg={s['total_mergers']:3d} comp={s['composite_organisms']:3d}  |  "
+                    f"gstr={s['avg_genomic_stress']:.2f} casc={s['cascade_organisms']:3d}  |  "
+                    f"clps={s['collapsed_zones']:5d} fng={s['fungal_mean']:.3f}  |  "
+                    f"kill={s['kills']:3d}  |  mod={s['avg_modules']:.2f}  |  {el:.1f}s"
+                )
 
-        if world.pop == 0:
-            print(f"\n  *** EXTINCTION at t={world.timestep} ***")
-            break
+            if world.pop == 0:
+                print(f"\n  *** EXTINCTION at t={world.timestep} ***")
+                break
+    except KeyboardInterrupt:
+        print(f"\n  Interrupted at t={world.timestep}")
 
     el = time.time() - start
     print(f"{'─' * 160}")

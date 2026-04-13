@@ -830,6 +830,9 @@ def main():
         pygame.display.flip()
         clock.tick(FPS)
 
+    # Export pivotal moments before exit
+    world._export_run_index()
+
     pygame.quit()
     sys.exit()
 
