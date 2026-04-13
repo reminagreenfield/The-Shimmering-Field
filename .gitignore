@@ -1,0 +1,3 @@
+__pycache__/
+houdini/hip/*.backup
+houdini/geo/

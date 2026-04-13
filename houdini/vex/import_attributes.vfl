@@ -1,0 +1,23 @@
+// Derived parameters for creature generation
+f@body_scale = fit01(f@energy_norm, 0.5, 1.5);
+i@num_lobes = clamp(i@merger_count + 1, 1, 8);
+f@surface_noise = fit(f@genomic_stress, 0, 15, 0.01, 0.3);
+f@armor_coverage = i@has_DEFENSE * 0.6;
+f@internal_density = fit(i@n_modules, 2, 8, 0.1, 1.0);
+f@branch_density = f@internal_density * f@body_scale;
+f@membrane_thickness = fit01(f@energy_norm, 0.005, 0.02);
+f@stress_distortion = f@stress_norm * 0.15;
+f@viral_striations = f@lysogenic_strength * 0.5;
+f@immune_lattice_density = f@immune_experience;
+f@social_glow = f@relationship_score / 10.0;
+f@hijack_warp = f@hijack_intensity * 0.3;
+f@shedding_thinning = 1.0 - (float(npoints(0) > 0) * 0.3); // placeholder
+
+// Photo module: upward branch bias
+f@photo_bias = i@has_PHOTO * 0.8;
+// Consume module: forward branch bias
+f@consume_bias = i@has_CONSUME * 0.6;
+// VResist: uniform internal mesh
+f@vresist_mesh = i@has_VRESIST * f@immune_lattice_density;
+// Defense: outward shell bias
+f@defense_bias = i@has_DEFENSE * f@armor_coverage;
