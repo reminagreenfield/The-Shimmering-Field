@@ -2,6 +2,7 @@
 
 import json
 import os
+import traceback
 
 import numpy as np
 
@@ -68,7 +69,7 @@ class PivotalMomentMixin:
     # ── Initialisation (called from World.__init__ via _init_pivotal) ──
 
     def _init_pivotal(self):
-        self._pivotal_events = []          # collected during the run
+        self._pivotal_index = []           # lightweight: (timestep, trigger, filename)
         self._pivotal_pop_history = []     # (timestep, pop) ring buffer for crash detect
         self._pivotal_peak_diversity = 0   # running max unique-species count
         self._pivotal_peak_module_count = 0  # running max module count on any organism
@@ -79,6 +80,8 @@ class PivotalMomentMixin:
         self._pivotal_export_dir = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             "exports")
+        self._pivotal_snap_count = 0
+        os.makedirs(self._pivotal_export_dir, exist_ok=True)
         print(f"  Pivotal moments export dir: {self._pivotal_export_dir}")
 
     # ── Hook: called from _attempt_endosymbiosis when a merger succeeds ──
@@ -90,7 +93,7 @@ class PivotalMomentMixin:
     # ── Per-tick detection (called at end of update()) ──
 
     def _detect_pivotal_moments(self):
-        """Run all detectors; any that fire produce an event entry."""
+        """Run all detectors; any that fire write a snapshot file immediately."""
         if self.pop == 0:
             return
 
@@ -98,7 +101,7 @@ class PivotalMomentMixin:
 
         # -- 1. Endosymbiotic merger --
         if self._pivotal_merger_flagged:
-            self._pivotal_events.append(self._make_event(t, "endosymbiotic_merger"))
+            self._export_snapshot(t, "endosymbiotic_merger")
             self._pivotal_merger_flagged = False
 
         # -- 2. Population crash (>30 % drop within 50 ticks) --
@@ -110,10 +113,10 @@ class PivotalMomentMixin:
         if len(self._pivotal_pop_history) >= 2:
             oldest_pop = self._pivotal_pop_history[0][1]
             if oldest_pop > 0 and self.pop < oldest_pop * 0.7:
-                self._pivotal_events.append(self._make_event(
+                self._export_snapshot(
                     t, "population_crash",
                     {"from": oldest_pop, "to": self.pop,
-                     "window_ticks": t - self._pivotal_pop_history[0][0]}))
+                     "window_ticks": t - self._pivotal_pop_history[0][0]})
                 # reset so we don't fire every tick of a continuing crash
                 self._pivotal_pop_history = [(t, self.pop)]
 
@@ -122,11 +125,11 @@ class PivotalMomentMixin:
         max_now = int(mod_counts.max()) if self.pop > 0 else 0
         if max_now >= 4 and max_now > self._pivotal_peak_module_count:
             idx = int(np.argmax(mod_counts))
-            self._pivotal_events.append(self._make_event(
+            self._export_snapshot(
                 t, "new_high_module_species",
                 {"module_count": max_now,
                  "modules": [MODULE_NAMES[m] for m in range(N_MODULES)
-                             if self.module_present[idx, m]]}))
+                             if self.module_present[idx, m]]})
             self._pivotal_peak_module_count = max_now
 
         # -- 4. Peak species diversity --
@@ -137,16 +140,16 @@ class PivotalMomentMixin:
         diversity = len(sigs)
         if diversity > self._pivotal_peak_diversity:
             self._pivotal_peak_diversity = diversity
-            self._pivotal_events.append(self._make_event(
+            self._export_snapshot(
                 t, "peak_species_diversity",
-                {"unique_species": diversity}))
+                {"unique_species": diversity})
 
         # -- 5. Viral epidemic (>60 % infected) --
         infected_frac = float((self.viral_load > 0).sum()) / max(self.pop, 1)
         if infected_frac > 0.6:
-            self._pivotal_events.append(self._make_event(
+            self._export_snapshot(
                 t, "viral_epidemic",
-                {"infected_fraction": round(infected_frac, 3)}))
+                {"infected_fraction": round(infected_frac, 3)})
 
         # -- 6. Max complexity organism --
         # complexity = modules_present * (1 + merger_count) + transfer_count
@@ -157,10 +160,10 @@ class PivotalMomentMixin:
         if max_cx > self._pivotal_peak_cx_score:
             self._pivotal_peak_cx_score = max_cx
             idx = int(np.argmax(complexity))
-            self._pivotal_events.append(self._make_event(
+            self._export_snapshot(
                 t, "max_complexity_organism",
                 {"complexity_score": round(max_cx, 2),
-                 "organism_id": int(self.ids[idx])}))
+                 "organism_id": int(self.ids[idx])})
 
         # -- 7. Fungal network surge after mass death --
         fungal_mean = float(self.fungal_density.mean())
@@ -169,28 +172,43 @@ class PivotalMomentMixin:
         fungal_surged = (self._pivotal_prev_fungal_mean > 0
                          and fungal_mean > self._pivotal_prev_fungal_mean * 1.5)
         if pop_dropped and fungal_surged:
-            self._pivotal_events.append(self._make_event(
+            self._export_snapshot(
                 t, "fungal_surge_after_death",
                 {"prev_pop": self._pivotal_prev_pop, "cur_pop": self.pop,
                  "prev_fungal": round(self._pivotal_prev_fungal_mean, 6),
-                 "cur_fungal": round(fungal_mean, 6)}))
+                 "cur_fungal": round(fungal_mean, 6)})
 
         self._pivotal_prev_fungal_mean = fungal_mean
         self._pivotal_prev_pop = self.pop
 
-    # ── Snapshot builder ──
+    # ── Snapshot export (writes one file per event) ──
 
-    def _make_event(self, timestep, trigger, extra=None):
-        """Build a full-state snapshot dict for one pivotal event."""
-        snap = {
-            "timestep": timestep,
-            "trigger": trigger,
-            "extra": extra or {},
-            "population": self.pop,
-            "organisms": self._snapshot_all_organisms(),
-            "environment": self._snapshot_environment(),
-        }
-        return snap
+    def _export_snapshot(self, timestep, trigger, extra=None):
+        """Write a single full-state snapshot to disk immediately."""
+        self._pivotal_snap_count += 1
+        filename = f"pivotal_{timestep:06d}_{trigger}.json"
+        filepath = os.path.join(self._pivotal_export_dir, filename)
+        print(f"  PIVOTAL [{self._pivotal_snap_count}] t={timestep} {trigger} -> {filename}")
+
+        try:
+            snap = {
+                "timestep": timestep,
+                "trigger": trigger,
+                "extra": extra or {},
+                "population": self.pop,
+                "organisms": self._snapshot_all_organisms(),
+                "environment": self._snapshot_environment(),
+            }
+            with open(filepath, "w") as f:
+                json.dump(snap, f)
+            self._pivotal_index.append({
+                "timestep": timestep,
+                "trigger": trigger,
+                "file": filename,
+            })
+        except Exception:
+            print(f"  ERROR exporting {filename}:")
+            traceback.print_exc()
 
     def _snapshot_all_organisms(self):
         """Export every organism with full detail."""
@@ -239,20 +257,17 @@ class PivotalMomentMixin:
             "viral_particles": self.viral_particles.tolist(),
         }
 
-    # ── End-of-run export ──
+    # ── End-of-run index ──
 
     def _export_run_index(self):
-        """Write all collected pivotal events to a JSON index file."""
-        if not self._pivotal_events:
+        """Write the lightweight index of all exported snapshots."""
+        if not self._pivotal_index:
             print(f"  Pivotal moments: 0 events detected, nothing to export.")
             return
-        out_dir = self._pivotal_export_dir
-        os.makedirs(out_dir, exist_ok=True)
-        path = os.path.join(out_dir, "pivotal_moments.json")
+        path = os.path.join(self._pivotal_export_dir, "pivotal_moments.json")
         with open(path, "w") as f:
             json.dump({
-                "total_events": len(self._pivotal_events),
-                "triggers": [e["trigger"] for e in self._pivotal_events],
-                "events": self._pivotal_events,
+                "total_events": len(self._pivotal_index),
+                "events": self._pivotal_index,
             }, f, indent=2)
-        print(f"  Pivotal moments: {len(self._pivotal_events)} events -> {path}")
+        print(f"  Pivotal moments: {len(self._pivotal_index)} snapshots indexed -> {path}")
